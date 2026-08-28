@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>kicban — Video → Text</h1>
+<p class="subtitle">Dán link video (YouTube/TikTok/Facebook/URL trực tiếp) hoặc tải file lên để trích văn bản giọng nói.</p>
+
+<form id="job-form">
+    <div class="tabs">
+        <button type="button" class="tab-btn active" data-tab="link">Dán link</button>
+        <button type="button" class="tab-btn" data-tab="upload">Tải file lên</button>
+    </div>
+
+    <div class="tab-panel" data-panel="link">
+        <input type="url" id="url-input" name="url" placeholder="https://www.youtube.com/watch?v=..." />
+    </div>
+    <div class="tab-panel hidden" data-panel="upload">
+        <input type="file" id="file-input" name="file" accept="video/*,audio/*" />
+    </div>
+
+    <div class="options-row">
+        <label>
+            Ngôn ngữ
+            <select id="language-select" name="language">
+                {% for code, label in languages %}
+                <option value="{{ code }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Engine
+            <select id="engine-select" name="engine">
+                <option value="local">Local (miễn phí)</option>
+                <option value="openai" {% if not openai_enabled %}disabled{% endif %}>
+                    OpenAI (trả phí, nhanh hơn){% if not openai_enabled %} — chưa cấu hình API key{% endif %}
+                </option>
+            </select>
+        </label>
+    </div>
+
+    <button type="submit" id="submit-btn">Transcribe</button>
+</form>
+
+<div id="status-panel" class="hidden">
+    <p id="status-text"></p>
+</div>
+
+<div id="result-panel" class="hidden">
+    <h2>Kết quả</h2>
+    <p id="detected-language"></p>
+    <textarea id="transcript-text" readonly rows="12"></textarea>
+    <div class="download-row">
+        <a id="download-txt" href="#">Tải .txt</a>
+        <a id="download-srt" href="#">Tải .srt</a>
+    </div>
+</div>
+
+<div id="history-panel">
+    <h2>Lịch sử gần đây</h2>
+    <ul id="history-list"></ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/app.js"></script>
+{% endblock %}

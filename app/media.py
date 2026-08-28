@@ -1,0 +1,106 @@
+from pathlib import Path
+
+import httpx
+import yt_dlp
+
+from app.config import DOWNLOADS_DIR, MAX_DURATION_SECONDS
+
+
+class MediaError(Exception):
+    pass
+
+
+class UnsupportedLinkError(MediaError):
+    pass
+
+
+class VideoTooLongError(MediaError):
+    def __init__(self, duration: float):
+        self.duration = duration
+        super().__init__(
+            f"Video is longer than the {MAX_DURATION_SECONDS // 60} minute limit for this tool."
+        )
+
+
+def probe_url(url: str) -> dict:
+    """Cheaply fetch metadata (duration, title) without downloading."""
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError:
+        return {"supported": False, "duration": None, "title": None}
+    return {
+        "supported": True,
+        "duration": info.get("duration"),
+        "title": info.get("title"),
+    }
+
+
+def download_via_ytdlp(url: str, job_id: str) -> Path:
+    out_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "format": "bestaudio/best",
+        "outtmpl": out_template,
+        "noplaylist": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            path = Path(ydl.prepare_filename(info))
+    except yt_dlp.utils.DownloadError as e:
+        raise MediaError(
+            "Could not access this video. It may be private, deleted, "
+            "region-locked, or age-restricted."
+        ) from e
+    if not path.exists():
+        raise MediaError("Download completed but the output file was not found.")
+    return path
+
+
+def download_direct_url(url: str, job_id: str) -> Path:
+    """Fallback for plain file URLs yt-dlp doesn't recognize as a supported site."""
+    suffix = Path(url.split("?")[0]).suffix or ".bin"
+    dest = DOWNLOADS_DIR / f"{job_id}{suffix}"
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as resp:
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_bytes():
+                    f.write(chunk)
+    except httpx.HTTPError as e:
+        raise UnsupportedLinkError(
+            "This link isn't supported. Try a YouTube/TikTok/Facebook link, "
+            "a direct video file URL, or upload the file directly."
+        ) from e
+    return dest
+
+
+def fetch_url(url: str, job_id: str) -> Path:
+    info = probe_url(url)
+    if info["supported"]:
+        duration = info.get("duration")
+        if duration and duration > MAX_DURATION_SECONDS:
+            raise VideoTooLongError(duration)
+        return download_via_ytdlp(url, job_id)
+    return download_direct_url(url, job_id)
+
+
+async def save_upload(upload_file, job_id: str, max_bytes: int) -> Path:
+    suffix = Path(upload_file.filename or "").suffix or ".bin"
+    dest = Path(str(DOWNLOADS_DIR / f"{job_id}{suffix}"))
+    total = 0
+    with open(dest, "wb") as f:
+        while chunk := await upload_file.read(1024 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise MediaError(
+                    f"File exceeds the {max_bytes // (1024 * 1024)}MB upload limit."
+                )
+            f.write(chunk)
+    return dest
