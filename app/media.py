@@ -2,6 +2,7 @@ from pathlib import Path
 
 import httpx
 import yt_dlp
+import yt_dlp.extractor as yt_dlp_extractor
 
 from app.config import DOWNLOADS_DIR, MAX_DURATION_SECONDS, YTDLP_COOKIES_FILE
 
@@ -11,6 +12,23 @@ def _ytdlp_base_opts() -> dict:
     if YTDLP_COOKIES_FILE:
         opts["cookiefile"] = YTDLP_COOKIES_FILE
     return opts
+
+
+def _is_known_site(url: str) -> bool:
+    """True if a specific (non-generic) yt-dlp extractor recognizes this URL,
+    e.g. YouTube/TikTok/Facebook. Used to decide whether a yt-dlp download
+    failure should be reported as-is (site is supported but the download
+    itself failed) rather than falling back to a raw-file fetch (which only
+    makes sense for a plain direct video/audio URL yt-dlp doesn't recognize)."""
+    for ie in yt_dlp_extractor.gen_extractor_classes():
+        if ie.IE_NAME == "generic":
+            continue
+        try:
+            if ie.suitable(url):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 class MediaError(Exception):
@@ -108,6 +126,8 @@ def fetch_url(url: str, job_id: str) -> Path:
     try:
         return download_via_ytdlp(url, job_id)
     except MediaError:
+        if _is_known_site(url):
+            raise
         return download_direct_url(url, job_id)
 
 
