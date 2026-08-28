@@ -1,16 +1,37 @@
+import shutil
+import threading
 from pathlib import Path
 
 import httpx
 import yt_dlp
 import yt_dlp.extractor as yt_dlp_extractor
 
-from app.config import DOWNLOADS_DIR, MAX_DURATION_SECONDS, YTDLP_COOKIES_FILE
+from app.config import DATA_DIR, DOWNLOADS_DIR, MAX_DURATION_SECONDS, YTDLP_COOKIES_FILE
+
+_RUNTIME_COOKIES_FILE = DATA_DIR / "cookies_runtime.txt"
+_cookies_lock = threading.Lock()
+
+
+def _writable_cookies_path() -> str | None:
+    """yt-dlp rewrites the cookiefile on every close() to persist updated
+    cookies. On Render, YTDLP_COOKIES_FILE points at a Secret File mount
+    (/etc/secrets/...), which is read-only - that write fails and raises an
+    OSError that masks the real download error (or even fails an otherwise
+    successful download). Work around it by copying the configured cookies
+    file to a writable path once and using that copy for yt-dlp instead."""
+    if not YTDLP_COOKIES_FILE:
+        return None
+    with _cookies_lock:
+        if not _RUNTIME_COOKIES_FILE.exists():
+            shutil.copyfile(YTDLP_COOKIES_FILE, _RUNTIME_COOKIES_FILE)
+    return str(_RUNTIME_COOKIES_FILE)
 
 
 def _ytdlp_base_opts() -> dict:
     opts = {"quiet": True, "no_warnings": True, "noprogress": True}
-    if YTDLP_COOKIES_FILE:
-        opts["cookiefile"] = YTDLP_COOKIES_FILE
+    cookies_path = _writable_cookies_path()
+    if cookies_path:
+        opts["cookiefile"] = cookies_path
     return opts
 
 
