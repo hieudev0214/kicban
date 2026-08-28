@@ -80,6 +80,7 @@ def _run_job(job_id: str) -> None:
             segments_json=segments_json,
         )
     except (MediaError, AudioError) as e:
+        logger.warning("Job %s failed with a known error: %s", job_id, e, exc_info=True)
         db.update_job(job_id, status="error", error=str(e), stage_message="Error")
     except Exception:
         logger.exception("Job %s failed", job_id)

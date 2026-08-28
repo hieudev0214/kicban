@@ -22,19 +22,22 @@ class VideoTooLongError(MediaError):
         )
 
 
-def probe_url(url: str) -> dict:
-    """Cheaply fetch metadata (duration, title) without downloading."""
+def probe_url(url: str) -> dict | None:
+    """
+    Best-effort cheap metadata fetch (duration, title) without downloading.
+    Returns None on any failure - this is only used for an early duration
+    check, so a failure here must NOT be treated as "site unsupported"
+    (that used to trigger a broken fallback that downloaded raw HTML as if
+    it were a media file). The real download attempt below has its own,
+    more reliable error handling.
+    """
     opts = {"quiet": True, "no_warnings": True, "skip_download": True}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError:
-        return {"supported": False, "duration": None, "title": None}
-    return {
-        "supported": True,
-        "duration": info.get("duration"),
-        "title": info.get("title"),
-    }
+    except Exception:
+        return None
+    return {"duration": info.get("duration"), "title": info.get("title")}
 
 
 def download_via_ytdlp(url: str, job_id: str) -> Path:
@@ -61,32 +64,46 @@ def download_via_ytdlp(url: str, job_id: str) -> Path:
     return path
 
 
+_UNSUPPORTED_MESSAGE = (
+    "This link isn't supported. Try a YouTube/TikTok/Facebook link, "
+    "a direct video file URL, or upload the file directly."
+)
+
+
 def download_direct_url(url: str, job_id: str) -> Path:
-    """Fallback for plain file URLs yt-dlp doesn't recognize as a supported site."""
+    """Last-resort fallback: fetch the URL as a raw file. Only used after
+    yt-dlp itself fails, e.g. for a plain link straight to a video/audio file."""
     suffix = Path(url.split("?")[0]).suffix or ".bin"
     dest = DOWNLOADS_DIR / f"{job_id}{suffix}"
     try:
         with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as resp:
             resp.raise_for_status()
+            content_type = resp.headers.get("content-type", "")
+            if not (
+                content_type.startswith("video/")
+                or content_type.startswith("audio/")
+                or content_type == "application/octet-stream"
+            ):
+                raise UnsupportedLinkError(_UNSUPPORTED_MESSAGE)
             with open(dest, "wb") as f:
                 for chunk in resp.iter_bytes():
                     f.write(chunk)
     except httpx.HTTPError as e:
-        raise UnsupportedLinkError(
-            "This link isn't supported. Try a YouTube/TikTok/Facebook link, "
-            "a direct video file URL, or upload the file directly."
-        ) from e
+        raise UnsupportedLinkError(_UNSUPPORTED_MESSAGE) from e
     return dest
 
 
 def fetch_url(url: str, job_id: str) -> Path:
     info = probe_url(url)
-    if info["supported"]:
+    if info:
         duration = info.get("duration")
         if duration and duration > MAX_DURATION_SECONDS:
             raise VideoTooLongError(duration)
+
+    try:
         return download_via_ytdlp(url, job_id)
-    return download_direct_url(url, job_id)
+    except MediaError:
+        return download_direct_url(url, job_id)
 
 
 async def save_upload(upload_file, job_id: str, max_bytes: int) -> Path:
