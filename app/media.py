@@ -59,7 +59,7 @@ def download_via_ytdlp(url: str, job_id: str) -> Path:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             path = Path(ydl.prepare_filename(info))
-    except yt_dlp.utils.DownloadError as e:
+    except Exception as e:
         raise MediaError(
             "Could not access this video. It may be private, deleted, "
             "region-locked, or age-restricted."
