@@ -3,7 +3,14 @@ from pathlib import Path
 import httpx
 import yt_dlp
 
-from app.config import DOWNLOADS_DIR, MAX_DURATION_SECONDS
+from app.config import DOWNLOADS_DIR, MAX_DURATION_SECONDS, YTDLP_COOKIES_FILE
+
+
+def _ytdlp_base_opts() -> dict:
+    opts = {"quiet": True, "no_warnings": True, "noprogress": True}
+    if YTDLP_COOKIES_FILE:
+        opts["cookiefile"] = YTDLP_COOKIES_FILE
+    return opts
 
 
 class MediaError(Exception):
@@ -31,7 +38,7 @@ def probe_url(url: str) -> dict | None:
     it were a media file). The real download attempt below has its own,
     more reliable error handling.
     """
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+    opts = {**_ytdlp_base_opts(), "skip_download": True}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -43,9 +50,7 @@ def probe_url(url: str) -> dict | None:
 def download_via_ytdlp(url: str, job_id: str) -> Path:
     out_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
     opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
+        **_ytdlp_base_opts(),
         "format": "bestaudio/best",
         "outtmpl": out_template,
         "noplaylist": True,

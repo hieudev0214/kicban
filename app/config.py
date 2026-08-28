@@ -29,3 +29,8 @@ MAX_DURATION_SECONDS = int(os.environ.get("MAX_DURATION_SECONDS", "7200"))
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "500"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_JOBS_PER_HOUR_PER_IP = int(os.environ.get("MAX_JOBS_PER_HOUR_PER_IP", "5"))
+
+# Path to a Netscape-format cookies.txt for yt-dlp. Needed on hosts whose IP
+# gets bot-detection blocked by YouTube/TikTok (common for cloud/datacenter
+# IPs). Leave unset to run without cookies (works fine on residential IPs).
+YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip() or None

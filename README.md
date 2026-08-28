@@ -54,6 +54,10 @@ Nếu dùng cá nhân trên máy này thì bỏ qua phần này. Nếu muốn pu
   ```
 - **Rate limit** đã có sẵn (`MAX_JOBS_PER_HOUR_PER_IP`, mặc định 5/giờ/IP) để tránh bị spam tốn tiền
   OpenAI API — chỉnh qua biến môi trường tuỳ nhu cầu thực tế.
+- **YouTube/TikTok chặn IP của hosting cloud**: đây là vấn đề rất phổ biến — các nền tảng này
+  chặn/bot-check các IP datacenter (Render, AWS, v.v.), khiến `yt-dlp` không tải được dù code đúng.
+  Cách khắc phục: dùng cookies từ tài khoản thật để `yt-dlp` giả dạng người dùng thật. Xem hướng dẫn
+  chi tiết bên dưới.
 - **Deploy lên Render.com** (đơn giản nhất cho người mới):
   1. Push code lên GitHub (repo git đã có sẵn ở đây, `git init` đã chạy tự động lúc `uv init`).
   2. Trên Render: New → Web Service → connect repo → Render tự nhận diện `Dockerfile`.
@@ -62,6 +66,22 @@ Nếu dùng cá nhân trên máy này thì bỏ qua phần này. Nếu muốn pu
   4. Deploy. Gói miễn phí của Render dùng ổ đĩa tạm (ephemeral) — nghĩa là `data/jobs.db` (lịch sử
      job) sẽ mất khi service restart/redeploy. Không ảnh hưởng chức năng transcribe, chỉ mất lịch sử
      cũ. Muốn giữ lịch sử lâu dài thì cần gói trả phí có Persistent Disk gắn vào `/app/data`.
+
+### Cấu hình cookies cho yt-dlp (bắt buộc nếu deploy lên cloud)
+
+1. Cài extension **"Get cookies.txt LOCALLY"** (Chrome/Edge Web Store) hoặc extension tương tự xuất
+   cookie định dạng Netscape.
+2. Đăng nhập YouTube bằng tài khoản Google thật trên trình duyệt → mở extension → xuất cookies cho
+   `youtube.com` → lưu file. Làm tương tự cho TikTok (đăng nhập `tiktok.com` → xuất cookies) — có thể
+   gộp chung 1 file `cookies.txt` (mỗi dòng ghi domain riêng, không xung đột nhau).
+3. Trên Render: vào service → **Environment** → mục **Secret Files** → **Add Secret File**:
+   - Filename/path: `/etc/secrets/cookies.txt`
+   - Contents: dán nội dung file `cookies.txt` vừa xuất.
+4. Cũng ở tab Environment, thêm biến `YTDLP_COOKIES_FILE` = `/etc/secrets/cookies.txt`.
+5. Render tự redeploy sau khi lưu. Thử lại link YouTube/TikTok.
+
+⚠️ Cookie có thể hết hạn theo thời gian (vài tuần đến vài tháng tuỳ nền tảng) — nếu link lại bị lỗi
+"not supported" sau một thời gian, lặp lại bước 1-2 để lấy cookie mới.
 
 ## Cấu trúc
 
