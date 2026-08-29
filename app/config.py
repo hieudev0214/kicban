@@ -30,7 +30,14 @@ MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "500"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_JOBS_PER_HOUR_PER_IP = int(os.environ.get("MAX_JOBS_PER_HOUR_PER_IP", "5"))
 
-# Path to a Netscape-format cookies.txt for yt-dlp. Needed on hosts whose IP
-# gets bot-detection blocked by YouTube/TikTok (common for cloud/datacenter
-# IPs). Leave unset to run without cookies (works fine on residential IPs).
+# Paths to Netscape-format cookies.txt files for yt-dlp. Needed on hosts
+# whose IP gets bot-detection blocked by YouTube/TikTok (common for
+# cloud/datacenter IPs). Leave unset to run without cookies (works fine on
+# residential IPs). Kept as separate files per site rather than one merged
+# file: combining TikTok's and YouTube's cookies into a single cookies.txt
+# was observed to break TikTok's extraction (its anti-bot challenge seems
+# sensitive to unrelated cookies being present), so each site gets its own.
 YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip() or None
+YTDLP_COOKIES_FILE_YOUTUBE = (
+    os.environ.get("YTDLP_COOKIES_FILE_YOUTUBE", "").strip() or None
+)

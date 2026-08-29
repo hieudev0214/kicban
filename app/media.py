@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import threading
 from pathlib import Path
@@ -6,28 +7,49 @@ import httpx
 import yt_dlp
 import yt_dlp.extractor as yt_dlp_extractor
 
-from app.config import DATA_DIR, DOWNLOADS_DIR, MAX_DURATION_SECONDS, YTDLP_COOKIES_FILE
+from app.config import (
+    DATA_DIR,
+    DOWNLOADS_DIR,
+    MAX_DURATION_SECONDS,
+    YTDLP_COOKIES_FILE,
+    YTDLP_COOKIES_FILE_YOUTUBE,
+)
 
-_RUNTIME_COOKIES_FILE = DATA_DIR / "cookies_runtime.txt"
 _cookies_lock = threading.Lock()
+_runtime_cookie_paths: dict[str, Path] = {}
 
 
-def _writable_cookies_path() -> str | None:
+def _cookies_source_for(url: str) -> str | None:
+    """Pick which configured cookies file applies to this URL. Kept separate
+    per site rather than merged into one file: combining TikTok's and
+    YouTube's cookies into a single cookies.txt was observed to break
+    TikTok's extraction, so each site gets its own runtime copy."""
+    if "youtube.com" in url or "youtu.be" in url:
+        return YTDLP_COOKIES_FILE_YOUTUBE or YTDLP_COOKIES_FILE
+    return YTDLP_COOKIES_FILE
+
+
+def _writable_cookies_path(source_file: str | None) -> str | None:
     """yt-dlp rewrites the cookiefile on every close() to persist updated
-    cookies. On Render, YTDLP_COOKIES_FILE points at a Secret File mount
+    cookies. On Render, a cookies file points at a Secret File mount
     (/etc/secrets/...), which is read-only - that write fails and raises an
     OSError that masks the real download error (or even fails an otherwise
     successful download). Work around it by copying the configured cookies
-    file to a writable path once and using that copy for yt-dlp instead."""
-    if not YTDLP_COOKIES_FILE:
+    file to a writable path once per source file and using that copy."""
+    if not source_file:
         return None
     with _cookies_lock:
-        if not _RUNTIME_COOKIES_FILE.exists():
-            shutil.copyfile(YTDLP_COOKIES_FILE, _RUNTIME_COOKIES_FILE)
-    return str(_RUNTIME_COOKIES_FILE)
+        runtime_path = _runtime_cookie_paths.get(source_file)
+        if runtime_path is None:
+            digest = hashlib.sha1(source_file.encode()).hexdigest()[:8]
+            runtime_path = DATA_DIR / f"cookies_runtime_{digest}.txt"
+            _runtime_cookie_paths[source_file] = runtime_path
+        if not runtime_path.exists():
+            shutil.copyfile(source_file, runtime_path)
+    return str(runtime_path)
 
 
-def _ytdlp_base_opts() -> dict:
+def _ytdlp_base_opts(url: str) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -39,7 +61,7 @@ def _ytdlp_base_opts() -> dict:
         # web for sites where this doesn't apply.
         "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}},
     }
-    cookies_path = _writable_cookies_path()
+    cookies_path = _writable_cookies_path(_cookies_source_for(url))
     if cookies_path:
         opts["cookiefile"] = cookies_path
     return opts
@@ -87,7 +109,7 @@ def probe_url(url: str) -> dict | None:
     it were a media file). The real download attempt below has its own,
     more reliable error handling.
     """
-    opts = {**_ytdlp_base_opts(), "skip_download": True}
+    opts = {**_ytdlp_base_opts(url), "skip_download": True}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -99,7 +121,7 @@ def probe_url(url: str) -> dict | None:
 def download_via_ytdlp(url: str, job_id: str) -> Path:
     out_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
     opts = {
-        **_ytdlp_base_opts(),
+        **_ytdlp_base_opts(url),
         "format": "bestaudio/best",
         "outtmpl": out_template,
         "noplaylist": True,

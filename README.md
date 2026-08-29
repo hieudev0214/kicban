@@ -69,19 +69,26 @@ Nếu dùng cá nhân trên máy này thì bỏ qua phần này. Nếu muốn pu
 
 ### Cấu hình cookies cho yt-dlp (bắt buộc nếu deploy lên cloud)
 
+⚠️ **Dùng 2 file cookies riêng cho TikTok và YouTube, không gộp chung 1 file** — đã kiểm chứng thực
+tế: gộp cookies YouTube vào cùng file với TikTok làm hỏng luôn khả năng vượt bot-check của TikTok
+(dù mỗi file cookies riêng vẫn hoạt động bình thường).
+
 1. Cài extension **"Get cookies.txt LOCALLY"** (Chrome/Edge Web Store) hoặc extension tương tự xuất
    cookie định dạng Netscape.
-2. Đăng nhập YouTube bằng tài khoản Google thật trên trình duyệt → mở extension → xuất cookies cho
-   `youtube.com` → lưu file. Làm tương tự cho TikTok (đăng nhập `tiktok.com` → xuất cookies) — có thể
-   gộp chung 1 file `cookies.txt` (mỗi dòng ghi domain riêng, không xung đột nhau).
-3. Trên Render: vào service → **Environment** → mục **Secret Files** → **Add Secret File**:
-   - Filename/path: `/etc/secrets/cookies.txt`
-   - Contents: dán nội dung file `cookies.txt` vừa xuất.
-4. Cũng ở tab Environment, thêm biến `YTDLP_COOKIES_FILE` = `/etc/secrets/cookies.txt`.
-5. Render tự redeploy sau khi lưu. Thử lại link YouTube/TikTok.
+2. Đăng nhập TikTok bằng tài khoản thật trên trình duyệt → mở extension trên tab `tiktok.com` →
+   **Export** (không phải "Export All Cookies") → lưu thành file `cookies_tiktok.txt`.
+3. Làm tương tự cho YouTube: đăng nhập `youtube.com` → mở extension trên tab đó → **Export** → lưu
+   thành file riêng `cookies_youtube.txt`.
+4. Trên Render: vào service → **Environment** → mục **Secret Files** → **Add Secret File** hai lần:
+   - Filename: `cookies_tiktok.txt`, Contents: dán nội dung file TikTok.
+   - Filename: `cookies_youtube.txt`, Contents: dán nội dung file YouTube.
+5. Cũng ở tab Environment, thêm 2 biến:
+   - `YTDLP_COOKIES_FILE` = `/etc/secrets/cookies_tiktok.txt` (dùng cho TikTok và các site khác)
+   - `YTDLP_COOKIES_FILE_YOUTUBE` = `/etc/secrets/cookies_youtube.txt` (chỉ dùng cho YouTube)
+6. Render tự redeploy sau khi lưu. Thử lại link YouTube/TikTok.
 
 ⚠️ Cookie có thể hết hạn theo thời gian (vài tuần đến vài tháng tuỳ nền tảng) — nếu link lại bị lỗi
-"not supported" sau một thời gian, lặp lại bước 1-2 để lấy cookie mới.
+"not supported" sau một thời gian, lặp lại bước 2-3 để lấy cookie mới cho file tương ứng.
 
 ## Cấu trúc
 
