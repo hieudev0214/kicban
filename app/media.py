@@ -28,7 +28,17 @@ def _writable_cookies_path() -> str | None:
 
 
 def _ytdlp_base_opts() -> dict:
-    opts = {"quiet": True, "no_warnings": True, "noprogress": True}
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        # YouTube requires a PO Token for the "web" client when the request
+        # comes from a datacenter/cloud IP (e.g. Render), which yt-dlp can't
+        # obtain without a separate token-provider service. The android/ios
+        # clients are checked less often, so try them first and fall back to
+        # web for sites where this doesn't apply.
+        "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}},
+    }
     cookies_path = _writable_cookies_path()
     if cookies_path:
         opts["cookiefile"] = cookies_path
