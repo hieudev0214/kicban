@@ -1,6 +1,8 @@
 import hashlib
+import logging
 import shutil
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -14,6 +16,8 @@ from app.config import (
     YTDLP_COOKIES_FILE,
     YTDLP_COOKIES_FILE_YOUTUBE,
 )
+
+logger = logging.getLogger("kicban.media")
 
 _cookies_lock = threading.Lock()
 _runtime_cookie_paths: dict[str, Path] = {}
@@ -118,6 +122,14 @@ def probe_url(url: str) -> dict | None:
     return {"duration": info.get("duration"), "title": info.get("title")}
 
 
+# TikTok's (and sometimes YouTube's) anti-bot challenge is flaky rather than
+# a hard block: the same URL can fail on one request and succeed on the next
+# from the same IP/cookies. A few retries with a short delay recovers most
+# of these transient failures without needing extra infrastructure.
+_MAX_YTDLP_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 3
+
+
 def download_via_ytdlp(url: str, job_id: str) -> Path:
     out_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
     opts = {
@@ -126,18 +138,27 @@ def download_via_ytdlp(url: str, job_id: str) -> Path:
         "outtmpl": out_template,
         "noplaylist": True,
     }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            path = Path(ydl.prepare_filename(info))
-    except Exception as e:
-        raise MediaError(
-            "Could not access this video. It may be private, deleted, "
-            "region-locked, or age-restricted."
-        ) from e
-    if not path.exists():
-        raise MediaError("Download completed but the output file was not found.")
-    return path
+    last_error: Exception | None = None
+    for attempt in range(1, _MAX_YTDLP_ATTEMPTS + 1):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                path = Path(ydl.prepare_filename(info))
+            if not path.exists():
+                raise MediaError("Download completed but the output file was not found.")
+            return path
+        except Exception as e:
+            last_error = e
+            if attempt < _MAX_YTDLP_ATTEMPTS:
+                logger.warning(
+                    "yt-dlp download attempt %d/%d failed for job %s, retrying: %s",
+                    attempt, _MAX_YTDLP_ATTEMPTS, job_id, e,
+                )
+                time.sleep(_RETRY_DELAY_SECONDS)
+    raise MediaError(
+        "Could not access this video. It may be private, deleted, "
+        "region-locked, or age-restricted."
+    ) from last_error
 
 
 _UNSUPPORTED_MESSAGE = (
