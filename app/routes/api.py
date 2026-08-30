@@ -77,7 +77,7 @@ def create_url_job(body: CreateUrlJob, request: Request, user: dict = Depends(au
     _charge(user["id"], price)
     job_id = db.create_job(user["id"], "url", url, body.language, price, duration_seconds=duration)
     jobs.enqueue(job_id)
-    return {"job_id": job_id, "price_vnd": price}
+    return {"job_id": job_id, "price_vnd": price, "duration_seconds": duration}
 
 
 @router.post("/upload", status_code=202)
@@ -110,7 +110,7 @@ async def create_upload_job(
 
     db.update_job(job_id, source_ref=str(saved_path), price_vnd=price, duration_seconds=duration)
     jobs.enqueue(job_id)
-    return {"job_id": job_id, "price_vnd": price}
+    return {"job_id": job_id, "price_vnd": price, "duration_seconds": duration}
 
 
 @router.get("")

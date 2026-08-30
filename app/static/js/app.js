@@ -40,6 +40,16 @@ function stopPolling() {
     }
 }
 
+function formatDuration(seconds) {
+    if (seconds === null || seconds === undefined) return "Không xác định được thời lượng video";
+    const total = Math.round(seconds);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    if (m === 0) return `Video dài ${s} giây`;
+    if (s === 0) return `Video dài ${m} phút`;
+    return `Video dài ${m} phút ${s} giây`;
+}
+
 function showStatus(text, isError = false, inProgress = true) {
     statusPanel.classList.remove("hidden");
     statusText.textContent = text;
@@ -143,10 +153,11 @@ form.addEventListener("submit", async (e) => {
     }
 
     const data = await res.json();
+    const durationMsg = formatDuration(data.duration_seconds);
     const priceMsg = data.price_vnd === 0
-        ? "Dùng lượt miễn phí"
-        : `Đã trừ ${data.price_vnd.toLocaleString("vi-VN")} đ`;
-    showStatus(`${priceMsg} — đã đưa vào hàng đợi...`);
+        ? "dùng lượt miễn phí"
+        : `đã trừ ${data.price_vnd.toLocaleString("vi-VN")} đ`;
+    showStatus(`${durationMsg} — ${priceMsg} — đã đưa vào hàng đợi...`);
     loadMe();
     pollJob(data.job_id);
 });
