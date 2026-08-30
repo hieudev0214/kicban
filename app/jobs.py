@@ -1,7 +1,5 @@
 import json
 import logging
-import queue
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -13,21 +11,23 @@ from app.transcribe import get_transcriber
 
 logger = logging.getLogger("kicban.jobs")
 
-# Local (GPU-bound) jobs run strictly one at a time via this queue + single worker
-# thread. OpenAI jobs don't touch local hardware, so they get their own small
-# thread pool and can run concurrently with each other and with the local job.
-_local_queue: "queue.Queue[str]" = queue.Queue()
-_openai_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="openai-job")
+# All jobs use the OpenAI engine now (the local faster-whisper engine was
+# removed), so there's no GPU/CPU hardware contention to serialize around -
+# a small thread pool is enough.
+_job_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="job")
 
 STAGE_FETCHING = "Fetching media..."
 STAGE_TRANSCRIBING = "Transcribing (this can take a while for long videos)..."
 
 
-def enqueue(job_id: str, engine: str) -> None:
-    if engine == "openai":
-        _openai_pool.submit(_run_job, job_id)
-    else:
-        _local_queue.put(job_id)
+def enqueue(job_id: str) -> None:
+    _job_pool.submit(_run_job, job_id)
+
+
+def _refund(job: dict) -> None:
+    if job["price_vnd"] > 0:
+        db.adjust_wallet_balance(job["user_id"], job["price_vnd"])
+        logger.info("Refunded %s VND to user %s for failed job %s", job["price_vnd"], job["user_id"], job["id"])
 
 
 def _run_job(job_id: str) -> None:
@@ -54,7 +54,7 @@ def _run_job(job_id: str) -> None:
             )
 
         db.update_job(job_id, status="transcribing", stage_message=STAGE_TRANSCRIBING)
-        transcriber = get_transcriber(job["engine"])
+        transcriber = get_transcriber()
         result = transcriber.transcribe(wav_path, job["language"])
 
         if not result.text.strip():
@@ -82,6 +82,7 @@ def _run_job(job_id: str) -> None:
     except (MediaError, AudioError) as e:
         logger.warning("Job %s failed with a known error: %s", job_id, e, exc_info=True)
         db.update_job(job_id, status="error", error=str(e), stage_message="Error")
+        _refund(job)
     except Exception:
         logger.exception("Job %s failed", job_id)
         db.update_job(
@@ -90,17 +91,4 @@ def _run_job(job_id: str) -> None:
             error="Something went wrong while processing this job.",
             stage_message="Error",
         )
-
-
-def _local_worker_loop() -> None:
-    while True:
-        job_id = _local_queue.get()
-        try:
-            _run_job(job_id)
-        finally:
-            _local_queue.task_done()
-
-
-def start_worker() -> None:
-    thread = threading.Thread(target=_local_worker_loop, daemon=True, name="local-job-worker")
-    thread.start()
+        _refund(job)

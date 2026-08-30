@@ -1,15 +1,8 @@
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from app.config import (
-    MODELS_DIR,
-    OPENAI_API_KEY,
-    OPENAI_STT_MODEL,
-    WHISPER_DEVICE,
-    WHISPER_MODEL,
-)
+from app.config import OPENAI_API_KEY, OPENAI_STT_MODEL
 
 
 @dataclass
@@ -48,82 +41,6 @@ LANGUAGE_CHOICES = [
     ("ar", "العربية"),
     ("hi", "हिन्दी"),
 ]
-
-
-def _build_model(device: str):
-    from faster_whisper import WhisperModel
-
-    compute_type = "float16" if device == "cuda" else "int8"
-    return WhisperModel(
-        WHISPER_MODEL, device=device, compute_type=compute_type, download_root=str(MODELS_DIR)
-    )
-
-
-class FasterWhisperTranscriber:
-    """
-    GPU->CPU fallback has to be handled in two different places, because CUDA
-    can fail in two different ways depending on the machine:
-    - No NVIDIA driver at all (e.g. a plain cloud VPS/container): WhisperModel()
-      construction itself raises immediately.
-    - Driver present but CUDA runtime libs missing (e.g. no CUDA Toolkit
-      installed on Windows): construction succeeds, but the failure only
-      surfaces on the first actual inference call.
-    """
-
-    _model = None
-    _device = None
-    _lock = threading.Lock()
-
-    @classmethod
-    def _get_model(cls):
-        if cls._model is None:
-            with cls._lock:
-                if cls._model is None:
-                    device = WHISPER_DEVICE if WHISPER_DEVICE != "auto" else "cuda"
-                    try:
-                        cls._model = _build_model(device)
-                        cls._device = device
-                    except Exception:
-                        if device == "cpu":
-                            raise
-                        cls._model = _build_model("cpu")
-                        cls._device = "cpu"
-        return cls._model
-
-    @classmethod
-    def _fall_back_to_cpu(cls):
-        with cls._lock:
-            cls._model = _build_model("cpu")
-            cls._device = "cpu"
-        return cls._model
-
-    def transcribe(self, wav_path: Path, language: str | None) -> TranscriptionResult:
-        model = self._get_model()
-        lang = None if language in (None, "auto") else language
-
-        try:
-            segments_iter, info = model.transcribe(
-                str(wav_path), language=lang, vad_filter=True
-            )
-            segments = [
-                Segment(start=s.start, end=s.end, text=s.text.strip())
-                for s in segments_iter
-            ]
-        except RuntimeError:
-            if self._device != "cuda" or WHISPER_DEVICE == "cpu":
-                raise
-            model = self._fall_back_to_cpu()
-            segments_iter, info = model.transcribe(
-                str(wav_path), language=lang, vad_filter=True
-            )
-            segments = [
-                Segment(start=s.start, end=s.end, text=s.text.strip())
-                for s in segments_iter
-            ]
-
-        text = " ".join(s.text for s in segments).strip()
-        return TranscriptionResult(text=text, language=info.language, segments=segments)
-
 
 
 # Only these OpenAI transcription models support response_format="verbose_json",
@@ -169,7 +86,5 @@ class OpenAITranscriber:
         return TranscriptionResult(text=text, language=detected_language, segments=segments)
 
 
-def get_transcriber(engine: str) -> Transcriber:
-    if engine == "openai":
-        return OpenAITranscriber()
-    return FasterWhisperTranscriber()
+def get_transcriber() -> Transcriber:
+    return OpenAITranscriber()

@@ -1,7 +1,48 @@
 {% extends "base.html" %}
 {% block content %}
+<nav class="topnav">
+    <div id="nav-guest" class="hidden">
+        <a href="/login">Đăng nhập</a>
+        <a href="/register">Đăng ký</a>
+    </div>
+    <div id="nav-user" class="hidden">
+        <span id="wallet-balance"></span>
+        <button type="button" id="topup-btn">Nạp tiền</button>
+        <a id="admin-link" href="/admin" class="hidden">Admin</a>
+        <button type="button" id="logout-btn">Đăng xuất</button>
+    </div>
+</nav>
+
 <h1>kicban — Video → Text</h1>
-<p class="subtitle">Dán link video (YouTube/TikTok/Facebook/URL trực tiếp) hoặc tải file lên để trích văn bản giọng nói.</p>
+<p class="subtitle">Dán link video (TikTok/Facebook/URL trực tiếp) hoặc tải file lên để trích văn bản giọng nói.</p>
+<p class="subtitle">YouTube tạm thời chưa được hỗ trợ. Mỗi lượt transcribe tốn <strong id="price-label"></strong>.</p>
+
+<div id="topup-panel" class="hidden">
+    <h2>Nạp tiền vào ví</h2>
+    <div id="topup-form-row" class="options-row">
+        <label>
+            Số tiền (VND)
+            <input type="number" id="topup-amount" min="10000" step="1000" value="50000" />
+        </label>
+    </div>
+    <button type="button" id="topup-submit">Tạo yêu cầu nạp tiền</button>
+    <p id="topup-status"></p>
+
+    <div id="topup-qr-panel" class="hidden">
+        <p>Quét mã QR bên dưới bằng app ngân hàng để chuyển khoản, <strong>giữ nguyên nội dung chuyển khoản</strong> —
+        admin sẽ đối chiếu nội dung này để cộng tiền vào ví cho bạn.</p>
+        <img id="topup-qr-img" alt="Mã QR chuyển khoản" />
+        <p>Số tiền: <strong id="topup-qr-amount"></strong></p>
+        <p>Nội dung chuyển khoản: <strong id="topup-qr-note"></strong></p>
+        <p>Ngân hàng nhận: <span id="topup-qr-bank"></span> — STK: <span id="topup-qr-account"></span> —
+        Chủ TK: <span id="topup-qr-name"></span></p>
+        <p class="subtitle">Sau khi chuyển khoản, yêu cầu sẽ ở trạng thái "Chờ duyệt" cho đến khi admin xác nhận đã
+        nhận được tiền.</p>
+    </div>
+
+    <h3>Lịch sử nạp tiền</h3>
+    <ul id="topup-history-list"></ul>
+</div>
 
 <form id="job-form">
     <div class="tabs">
@@ -10,7 +51,7 @@
     </div>
 
     <div class="tab-panel" data-panel="link">
-        <input type="url" id="url-input" name="url" placeholder="https://www.youtube.com/watch?v=..." />
+        <input type="url" id="url-input" name="url" placeholder="https://www.tiktok.com/@user/video/..." />
     </div>
     <div class="tab-panel hidden" data-panel="upload">
         <input type="file" id="file-input" name="file" accept="video/*,audio/*" />
@@ -23,16 +64,6 @@
                 {% for code, label in languages %}
                 <option value="{{ code }}">{{ label }}</option>
                 {% endfor %}
-            </select>
-        </label>
-
-        <label>
-            Engine
-            <select id="engine-select" name="engine">
-                <option value="local">Local (miễn phí)</option>
-                <option value="openai" {% if not openai_enabled %}disabled{% endif %}>
-                    OpenAI (trả phí, nhanh hơn){% if not openai_enabled %} — chưa cấu hình API key{% endif %}
-                </option>
             </select>
         </label>
     </div>
@@ -61,5 +92,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script>window.__PRICE_PER_JOB_VND__ = {{ price_per_job_vnd }};</script>
 <script src="/static/js/app.js"></script>
 {% endblock %}

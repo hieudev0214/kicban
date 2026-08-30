@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app import db, jobs
+from app import db
 from app.config import BASE_DIR, LOG_PATH
-from app.routes import api, pages
+from app.routes import admin, api, auth, pages, wallet
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,11 +18,13 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
-    jobs.start_worker()
     yield
 
 
 app = FastAPI(title="kicban", lifespan=lifespan)
 app.include_router(pages.router)
 app.include_router(api.router)
+app.include_router(auth.router)
+app.include_router(wallet.router)
+app.include_router(admin.router)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "app" / "static")), name="static")

@@ -13,7 +13,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app/ ./app/
 
-RUN mkdir -p data/uploads data/downloads data/audio data/transcripts models
+RUN mkdir -p data/uploads data/downloads data/audio data/transcripts
 
 ENV PATH="/app/.venv/bin:$PATH"
 

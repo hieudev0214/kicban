@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="topnav">
+    <a href="/">← Về trang chính</a>
+</nav>
+<h1>Quản trị</h1>
+<p id="admin-error" class="error-text"></p>
+
+<h2>Yêu cầu nạp tiền đang chờ</h2>
+<table id="topups-table" class="admin-table hidden">
+    <thead>
+        <tr>
+            <th>Email</th>
+            <th>Số tiền</th>
+            <th>Nội dung CK</th>
+            <th>Thời gian</th>
+            <th>Hành động</th>
+        </tr>
+    </thead>
+    <tbody id="topups-tbody"></tbody>
+</table>
+<p id="topups-empty" class="hidden">Không có yêu cầu nào đang chờ.</p>
+
+<h2>Người dùng</h2>
+<table id="users-table" class="admin-table hidden">
+    <thead>
+        <tr>
+            <th>Email</th>
+            <th>Vai trò</th>
+            <th>Số dư (VND)</th>
+            <th>Trạng thái</th>
+            <th>Ngày tạo</th>
+            <th>Hành động</th>
+        </tr>
+    </thead>
+    <tbody id="users-tbody"></tbody>
+</table>
+
+<div id="jobs-panel" class="hidden">
+    <h2>Job của <span id="jobs-user-email"></span></h2>
+    <ul id="jobs-list"></ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+{% endblock %}

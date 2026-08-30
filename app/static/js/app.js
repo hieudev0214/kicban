@@ -8,9 +8,21 @@ const detectedLanguage = document.getElementById("detected-language");
 const downloadTxt = document.getElementById("download-txt");
 const downloadSrt = document.getElementById("download-srt");
 const historyList = document.getElementById("history-list");
+const navGuest = document.getElementById("nav-guest");
+const navUser = document.getElementById("nav-user");
+const walletBalanceEl = document.getElementById("wallet-balance");
+const adminLink = document.getElementById("admin-link");
+const topupPanel = document.getElementById("topup-panel");
+const topupBtn = document.getElementById("topup-btn");
+const topupSubmit = document.getElementById("topup-submit");
+const topupStatus = document.getElementById("topup-status");
+const priceLabel = document.getElementById("price-label");
 
 let activeTab = "link";
 let pollTimer = null;
+let currentUser = null;
+
+priceLabel.textContent = `${window.__PRICE_PER_JOB_VND__.toLocaleString("vi-VN")} đ`;
 
 document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -61,11 +73,13 @@ async function pollJob(jobId) {
             showResult(job);
             submitBtn.disabled = false;
             loadHistory();
+            loadMe();
         } else if (job.status === "error") {
             stopPolling();
             showStatus(job.error || "Đã có lỗi xảy ra.", true);
             submitBtn.disabled = false;
             loadHistory();
+            loadMe();
         } else {
             showStatus(job.stage_message || job.status);
         }
@@ -74,12 +88,15 @@ async function pollJob(jobId) {
 
 form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!currentUser) {
+        window.location.href = "/login";
+        return;
+    }
     submitBtn.disabled = true;
     resultPanel.classList.add("hidden");
     showStatus("Đang gửi...");
 
     const language = document.getElementById("language-select").value;
-    const engine = document.getElementById("engine-select").value;
 
     let res;
     try {
@@ -93,7 +110,7 @@ form.addEventListener("submit", async (e) => {
             res = await fetch("/api/jobs", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url, language, engine }),
+                body: JSON.stringify({ url, language }),
             });
         } else {
             const fileInput = document.getElementById("file-input");
@@ -105,12 +122,16 @@ form.addEventListener("submit", async (e) => {
             const formData = new FormData();
             formData.append("file", fileInput.files[0]);
             formData.append("language", language);
-            formData.append("engine", engine);
             res = await fetch("/api/jobs/upload", { method: "POST", body: formData });
         }
     } catch (err) {
         showStatus("Không thể kết nối tới server.", true);
         submitBtn.disabled = false;
+        return;
+    }
+
+    if (res.status === 401) {
+        window.location.href = "/login";
         return;
     }
 
@@ -123,10 +144,12 @@ form.addEventListener("submit", async (e) => {
 
     const data = await res.json();
     showStatus("Đã đưa vào hàng đợi...");
+    loadMe();
     pollJob(data.job_id);
 });
 
 async function loadHistory() {
+    if (!currentUser) return;
     const res = await fetch("/api/jobs?limit=20");
     if (!res.ok) return;
     const jobList = await res.json();
@@ -152,4 +175,80 @@ async function loadHistory() {
     });
 }
 
-loadHistory();
+async function loadMe() {
+    const res = await fetch("/api/auth/me");
+    if (!res.ok) {
+        currentUser = null;
+        navGuest.classList.remove("hidden");
+        navUser.classList.add("hidden");
+        return;
+    }
+    currentUser = await res.json();
+    navGuest.classList.add("hidden");
+    navUser.classList.remove("hidden");
+    walletBalanceEl.textContent = `Số dư: ${currentUser.wallet_balance_vnd.toLocaleString("vi-VN")} đ`;
+    adminLink.classList.toggle("hidden", currentUser.role !== "admin");
+    loadHistory();
+}
+
+document.getElementById("logout-btn").addEventListener("click", async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.reload();
+});
+
+const topupQrPanel = document.getElementById("topup-qr-panel");
+const topupHistoryList = document.getElementById("topup-history-list");
+
+topupBtn.addEventListener("click", () => {
+    topupPanel.classList.toggle("hidden");
+    if (!topupPanel.classList.contains("hidden")) loadTopupHistory();
+});
+
+topupSubmit.addEventListener("click", async () => {
+    const amount = parseInt(document.getElementById("topup-amount").value, 10);
+    if (Number.isNaN(amount) || amount <= 0) {
+        topupStatus.textContent = "Số tiền không hợp lệ.";
+        return;
+    }
+    topupStatus.textContent = "Đang tạo yêu cầu...";
+    const res = await fetch("/api/wallet/topup-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount_vnd: amount }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        topupStatus.textContent = err.detail || "Không thể tạo yêu cầu nạp tiền.";
+        return;
+    }
+    const data = await res.json();
+    topupStatus.textContent = "";
+    topupQrPanel.classList.remove("hidden");
+    document.getElementById("topup-qr-img").src = data.qr_image_url;
+    document.getElementById("topup-qr-amount").textContent = `${data.amount_vnd.toLocaleString("vi-VN")} đ`;
+    document.getElementById("topup-qr-note").textContent = data.note;
+    document.getElementById("topup-qr-bank").textContent = data.bank_id;
+    document.getElementById("topup-qr-account").textContent = data.bank_account_no;
+    document.getElementById("topup-qr-name").textContent = data.bank_account_name;
+    loadTopupHistory();
+});
+
+const TOPUP_STATUS_LABELS = {
+    pending: "Chờ duyệt",
+    approved: "Đã cộng tiền",
+    rejected: "Bị từ chối",
+};
+
+async function loadTopupHistory() {
+    const res = await fetch("/api/wallet/my-topups");
+    if (!res.ok) return;
+    const topupList = await res.json();
+    topupHistoryList.innerHTML = "";
+    topupList.forEach((t) => {
+        const li = document.createElement("li");
+        li.textContent = `${t.amount_vnd.toLocaleString("vi-VN")} đ — ${t.note} — ${TOPUP_STATUS_LABELS[t.status] || t.status}`;
+        topupHistoryList.appendChild(li);
+    });
+}
+
+loadMe();

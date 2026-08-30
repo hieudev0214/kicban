@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Đăng nhập</h1>
+<form id="auth-form">
+    <label>
+        Email
+        <input type="email" id="email-input" required />
+    </label>
+    <label>
+        Mật khẩu
+        <input type="password" id="password-input" required />
+    </label>
+    <button type="submit" id="submit-btn">Đăng nhập</button>
+</form>
+<p id="auth-error" class="error-text"></p>
+<p>Chưa có tài khoản? <a href="/register">Đăng ký</a></p>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/login.js"></script>
+{% endblock %}

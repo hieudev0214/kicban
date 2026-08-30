@@ -122,3 +122,62 @@ button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
 #history-list a { color: var(--fg); }
 
 .error-text { color: #dc2626; }
+
+.topnav {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+.topnav a { color: var(--accent); text-decoration: none; }
+.topnav a:hover { text-decoration: underline; }
+#nav-guest, #nav-user { display: flex; align-items: center; gap: 1rem; }
+.topnav button {
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--fg);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+#topup-panel {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--panel-bg);
+    border-radius: 8px;
+}
+
+form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+}
+.admin-table th, .admin-table td {
+    text-align: left;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.admin-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.admin-actions button {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--fg);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}

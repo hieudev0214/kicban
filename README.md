@@ -1,18 +1,21 @@
 # kicban — Video → Text
 
-Web app nhỏ: dán link video (YouTube/TikTok/Facebook/URL trực tiếp) hoặc tải file video/audio lên,
-tool tự động trích văn bản giọng nói (đa ngôn ngữ). Có 2 engine speech-to-text để chọn: **local**
-(miễn phí, chạy bằng `faster-whisper` trên máy) hoặc **OpenAI API** (trả phí, nhanh hơn khi cần xử lý nhiều).
+Web app: đăng ký/đăng nhập tài khoản, nạp tiền vào ví bằng chuyển khoản ngân hàng (quét mã VietQR,
+admin xác nhận thủ công), dán link video (TikTok/Facebook/URL trực tiếp) hoặc tải file video/audio lên
+để trích văn bản giọng nói (đa ngôn ngữ) qua OpenAI API. Mỗi lượt transcribe trừ một khoản phí cố định
+vào ví. Có trang quản trị (admin) để duyệt yêu cầu nạp tiền, xem user/job, cộng/trừ tiền thủ công,
+khoá/xoá tài khoản.
+
+**YouTube tạm thời chưa được hỗ trợ** (YouTube chặn PO Token trên IP cloud, xem `CLAUDE.md` để biết
+chi tiết) — engine local (`faster-whisper`) cũng đã bị gỡ bỏ, chỉ còn dùng OpenAI API.
 
 ## Yêu cầu hệ thống
 
-- Windows với [`uv`](https://docs.astral.sh/uv/) đã cài (dùng để ghim Python 3.12 riêng cho project,
-  vì Python 3.14 mặc định trên máy chưa có wheel tương thích cho `faster-whisper`).
+- [`uv`](https://docs.astral.sh/uv/) đã cài (ghim Python 3.12 riêng cho project).
 - `ffmpeg`/`ffprobe` có sẵn trên PATH (dùng để trích audio từ video).
-- (Tuỳ chọn) GPU NVIDIA + [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) cài đặt riêng
-  nếu muốn engine local chạy nhanh trên GPU. **Lưu ý**: chỉ cài driver NVIDIA thôi thường chưa đủ —
-  `ctranslate2` trên Windows cần cuBLAS/cuDNN từ CUDA Toolkit; nếu thiếu, app tự động rơi về chạy CPU
-  (chậm hơn nhưng vẫn hoạt động đúng, đã kiểm chứng khi build).
+- Tài khoản OpenAI API (bắt buộc — không còn engine miễn phí).
+- Một tài khoản ngân hàng để nhận tiền nạp ví (không cần đăng ký merchant/cổng thanh toán nào —
+  xem mục "Cấu hình nạp tiền" bên dưới).
 
 ## Cài đặt
 
@@ -21,9 +24,16 @@ uv sync
 cp .env.example .env
 ```
 
-Sửa `.env` nếu muốn:
-- Đổi `WHISPER_MODEL` (`tiny`/`base`/`small`/`medium`/`large-v3`) — mặc định `medium`.
-- Điền `OPENAI_API_KEY` nếu muốn bật engine OpenAI trên UI (để trống thì nút OpenAI sẽ bị ẩn/disable).
+Sửa `.env`:
+- `OPENAI_API_KEY` — bắt buộc, dùng cho transcribe.
+- `SECRET_KEY` — bắt buộc trong production, ký session đăng nhập. Sinh bằng:
+  `python -c "import secrets; print(secrets.token_hex(32))"`
+- `ADMIN_EMAILS` — email nào đăng ký/đăng nhập bằng email này sẽ tự động thành admin. Đây là cách
+  duy nhất để tạo tài khoản admin đầu tiên.
+- `PRICE_PER_JOB_VND` — phí mỗi lượt transcribe (mặc định 5,000đ).
+- `BANK_ID`, `BANK_ACCOUNT_NO`, `BANK_ACCOUNT_NAME` — tài khoản ngân hàng nhận tiền nạp ví (xem mục
+  bên dưới). Nếu để trống, tính năng nạp tiền sẽ bị vô hiệu hoá (nút "Nạp tiền" báo lỗi), các phần
+  khác vẫn chạy bình thường.
 
 ## Chạy
 
@@ -39,61 +49,72 @@ Mở `http://localhost:8000`.
 uv run pytest
 ```
 
-## Đưa lên web công khai (nhiều người dùng)
+## Cấu hình nạp tiền (chuyển khoản thủ công + VietQR)
 
-Nếu dùng cá nhân trên máy này thì bỏ qua phần này. Nếu muốn public cho người khác dùng:
+Không dùng cổng thanh toán trung gian nào (VNPay/MoMo/PayOS...) — mọi cổng thanh toán tự động đều bắt
+buộc xác thực danh tính/doanh nghiệp trước khi cấp API key (quy định pháp luật, không né được), việc
+đó tốn thời gian chờ duyệt. Thay vào đó dùng thẳng tài khoản ngân hàng cá nhân/doanh nghiệp bạn đang
+có sẵn, hiển thị mã QR chuẩn VietQR (miễn phí, công khai, không cần đăng ký) cho khách quét chuyển
+khoản, rồi admin tự đối chiếu và duyệt.
 
-- **Host trên nền tảng không có GPU** (Render/Railway/VPS thường...): dùng engine **OpenAI** làm
-  chính (`OPENAI_API_KEY` bắt buộc set trên server) — engine Local vẫn chạy được (đã test kỹ trong
-  Docker container không GPU, tự động fallback về CPU đúng cách) nhưng sẽ **rất chậm** trên CPU dùng
-  chung của nhiều người, không phù hợp cho nhiều người dùng cùng lúc.
-- Đã có sẵn `Dockerfile` + `.dockerignore`, build/test được bằng Docker thật (không chỉ lý thuyết):
+1. Điền vào `.env`:
+   - `BANK_ID` = mã ngân hàng viết tắt hoặc mã BIN (ví dụ `vietcombank` hoặc `970436`) — tra cứu đầy đủ
+     tại https://api.vietqr.io/v2/banks.
+   - `BANK_ACCOUNT_NO` = số tài khoản nhận tiền.
+   - `BANK_ACCOUNT_NAME` = tên chủ tài khoản (không dấu, đúng như trên thẻ/tài khoản).
+2. Luồng hoạt động:
+   - User bấm "Nạp tiền", nhập số tiền → hệ thống tạo yêu cầu (trạng thái `pending`) kèm **nội dung
+     chuyển khoản riêng** (dạng `NAP XXXXXXXX`) và hiện mã QR VietQR tương ứng.
+   - User quét mã bằng app ngân hàng, chuyển khoản **giữ nguyên nội dung** đó.
+   - Admin vào `/admin`, mục "Yêu cầu nạp tiền đang chờ" — đối chiếu với sao kê ngân hàng thật, bấm
+     **Duyệt** để cộng tiền vào ví, hoặc **Từ chối** nếu không khớp/không nhận được tiền.
+   - Không có xác nhận tự động — đây là đánh đổi chấp nhận được để tránh phải qua quy trình đăng ký
+     merchant tốn thời gian của các cổng thanh toán.
+
+## Tài khoản admin
+
+Không có giao diện "tạo admin" riêng — thêm email của bạn vào biến `ADMIN_EMAILS` (phân tách bằng dấu
+phẩy nếu nhiều email) trước khi đăng ký/đăng nhập bằng email đó, tài khoản sẽ tự động có quyền admin.
+Trang quản trị ở `/admin`: duyệt/từ chối yêu cầu nạp tiền, xem danh sách user + số dư + lịch sử job,
+cộng/trừ tiền thủ công, khoá/mở khoá, xoá tài khoản.
+
+## Đưa lên web công khai
+
+- Đã có sẵn `Dockerfile` + `.dockerignore`:
   ```bash
   docker build -t kicban .
-  docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... -e MAX_JOBS_PER_HOUR_PER_IP=10 kicban
+  docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... -e SECRET_KEY=... -e ADMIN_EMAILS=you@example.com kicban
   ```
-- **Rate limit** đã có sẵn (`MAX_JOBS_PER_HOUR_PER_IP`, mặc định 5/giờ/IP) để tránh bị spam tốn tiền
-  OpenAI API — chỉnh qua biến môi trường tuỳ nhu cầu thực tế.
-- **YouTube/TikTok chặn IP của hosting cloud**: đây là vấn đề rất phổ biến — các nền tảng này
-  chặn/bot-check các IP datacenter (Render, AWS, v.v.), khiến `yt-dlp` không tải được dù code đúng.
-  Cách khắc phục: dùng cookies từ tài khoản thật để `yt-dlp` giả dạng người dùng thật. Xem hướng dẫn
-  chi tiết bên dưới.
-- **Deploy lên Render.com** (đơn giản nhất cho người mới):
-  1. Push code lên GitHub (repo git đã có sẵn ở đây, `git init` đã chạy tự động lúc `uv init`).
-  2. Trên Render: New → Web Service → connect repo → Render tự nhận diện `Dockerfile`.
-  3. Tab Environment: thêm `OPENAI_API_KEY`, `MAX_JOBS_PER_HOUR_PER_IP`, `MAX_UPLOAD_MB`,
-     `MAX_DURATION_SECONDS` tuỳ ý.
-  4. Deploy. Gói miễn phí của Render dùng ổ đĩa tạm (ephemeral) — nghĩa là `data/jobs.db` (lịch sử
-     job) sẽ mất khi service restart/redeploy. Không ảnh hưởng chức năng transcribe, chỉ mất lịch sử
-     cũ. Muốn giữ lịch sử lâu dài thì cần gói trả phí có Persistent Disk gắn vào `/app/data`.
+- **Rate limit** có sẵn (`MAX_JOBS_PER_HOUR_PER_IP`, mặc định 5/giờ/IP) chống spam ngoài cơ chế ví tiền.
+- **Deploy lên Render.com**:
+  1. Push code lên GitHub.
+  2. Render: New → Web Service → connect repo → tự nhận diện `Dockerfile`.
+  3. Tab Environment: thêm đầy đủ biến trong `.env.example` (đặc biệt `SECRET_KEY`, `ADMIN_EMAILS`,
+     `OPENAI_API_KEY`, `BANK_*`).
+  4. Deploy. Gói miễn phí dùng ổ đĩa tạm (ephemeral) — `data/jobs.db` (user, ví, lịch sử job) sẽ **mất
+     khi redeploy**. Muốn giữ dữ liệu lâu dài cần gói trả phí có Persistent Disk gắn vào `/app/data`,
+     **bắt buộc** một khi đã có user thật nạp tiền thật (mất dữ liệu = mất luôn thông tin số dư/thanh
+     toán của khách).
 
-### Cấu hình cookies cho yt-dlp (bắt buộc nếu deploy lên cloud)
+### Cấu hình cookies cho yt-dlp (TikTok/Facebook trên cloud)
 
-⚠️ **Dùng 2 file cookies riêng cho TikTok và YouTube, không gộp chung 1 file** — đã kiểm chứng thực
-tế: gộp cookies YouTube vào cùng file với TikTok làm hỏng luôn khả năng vượt bot-check của TikTok
-(dù mỗi file cookies riêng vẫn hoạt động bình thường).
+⚠️ **Dùng file cookies riêng cho TikTok, không gộp chung với cookies khác** — đã kiểm chứng thực tế:
+gộp cookies domain khác vào cùng file làm hỏng khả năng vượt bot-check của TikTok.
 
-1. Cài extension **"Get cookies.txt LOCALLY"** (Chrome/Edge Web Store) hoặc extension tương tự xuất
-   cookie định dạng Netscape.
-2. Đăng nhập TikTok bằng tài khoản thật trên trình duyệt → mở extension trên tab `tiktok.com` →
-   **Export** (không phải "Export All Cookies") → lưu thành file `cookies_tiktok.txt`.
-3. Làm tương tự cho YouTube: đăng nhập `youtube.com` → mở extension trên tab đó → **Export** → lưu
-   thành file riêng `cookies_youtube.txt`.
-4. Trên Render: vào service → **Environment** → mục **Secret Files** → **Add Secret File** hai lần:
-   - Filename: `cookies_tiktok.txt`, Contents: dán nội dung file TikTok.
-   - Filename: `cookies_youtube.txt`, Contents: dán nội dung file YouTube.
-5. Cũng ở tab Environment, thêm 2 biến:
-   - `YTDLP_COOKIES_FILE` = `/etc/secrets/cookies_tiktok.txt` (dùng cho TikTok và các site khác)
-   - `YTDLP_COOKIES_FILE_YOUTUBE` = `/etc/secrets/cookies_youtube.txt` (chỉ dùng cho YouTube)
-6. Render tự redeploy sau khi lưu. Thử lại link YouTube/TikTok.
+1. Cài extension **"Get cookies.txt LOCALLY"** (Chrome/Edge Web Store).
+2. Đăng nhập TikTok bằng tài khoản thật → mở extension trên tab `tiktok.com` → **Export** (không phải
+   "Export All Cookies") → lưu thành file `cookies.txt`.
+3. Trên Render: **Environment → Secret Files → Add Secret File**: Filename `cookies.txt`, dán nội dung.
+4. Thêm biến `YTDLP_COOKIES_FILE` = `/etc/secrets/cookies.txt`.
+5. Render tự redeploy. Thử lại link TikTok.
 
-⚠️ Cookie có thể hết hạn theo thời gian — **TikTok đã ghi nhận thực tế hết hạn chỉ sau ~1 ngày**, còn
-YouTube thường sống lâu hơn (vài tuần đến vài tháng). Nếu link lại bị lỗi "Could not access this
-video" sau một thời gian, lặp lại bước 2-3 để lấy cookie mới cho file tương ứng. Với TikTok, chuẩn bị
-tinh thần phải làm lại việc này khá thường xuyên.
+⚠️ Cookie TikTok hết hạn khá nhanh trong thực tế (đã ghi nhận chỉ ~1 ngày) — nếu lại lỗi "Could not
+access this video", lặp lại bước 2 để lấy cookie mới. `YTDLP_COOKIES_FILE_YOUTUBE` vẫn còn trong code
+(dự phòng cho lúc bật lại YouTube) nhưng hiện không cần cấu hình vì YouTube đang bị chặn ở tầng API.
 
 ## Cấu trúc
 
-Xem chi tiết trong `app/` — `media.py` (tải video/audio), `audio.py` (chuẩn hoá bằng ffmpeg),
-`transcribe.py` (2 engine STT), `jobs.py` (hàng đợi xử lý nền), `routes/` (API + trang web).
-Dữ liệu job lưu tại `data/jobs.db` (SQLite), model local tải về `models/`.
+Xem chi tiết trong `CLAUDE.md`. Tóm tắt: `media.py` (tải video/audio), `audio.py` (chuẩn hoá bằng
+ffmpeg), `transcribe.py` (OpenAI STT), `jobs.py` (hàng đợi xử lý nền + hoàn tiền tự động khi lỗi),
+`auth.py`/`routes/auth.py` (đăng ký/đăng nhập), `vietqr.py`/`routes/wallet.py` (yêu cầu nạp tiền +
+tạo mã QR), `routes/admin.py` (quản trị, gồm duyệt nạp tiền). Dữ liệu lưu tại `data/jobs.db` (SQLite).
