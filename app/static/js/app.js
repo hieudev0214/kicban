@@ -147,7 +147,18 @@ form.addEventListener("submit", async (e) => {
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        showStatus(err.detail || "Yêu cầu không hợp lệ.", true, false);
+        const detail = err.detail;
+        if (detail && typeof detail === "object") {
+            // Structured detail from _charge(): includes the duration the
+            // price was based on, so an "insufficient balance" rejection
+            // shows what was actually detected rather than just the amount.
+            const durationMsg = detail.duration_seconds != null
+                ? `Video dài ${formatDuration(detail.duration_seconds)} — `
+                : "";
+            showStatus(`${durationMsg}${detail.message}`, true, false);
+        } else {
+            showStatus(detail || "Yêu cầu không hợp lệ.", true, false);
+        }
         submitBtn.disabled = false;
         return;
     }

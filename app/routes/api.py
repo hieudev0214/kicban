@@ -46,11 +46,15 @@ def _price_for(user_id: str, duration: float | None) -> int:
     return pricing.price_for_duration_seconds(duration)
 
 
-def _charge(user_id: str, price_vnd: int) -> None:
+def _charge(user_id: str, price_vnd: int, duration: float | None) -> None:
     if price_vnd > 0 and not db.try_charge_wallet(user_id, price_vnd):
         raise HTTPException(
             402,
-            f"Số dư ví không đủ (cần {price_vnd:,} VND). Vui lòng nạp thêm tiền.",
+            {
+                "message": f"Số dư ví không đủ (cần {price_vnd:,} VND). Vui lòng nạp thêm tiền.",
+                "duration_seconds": duration,
+                "price_vnd": price_vnd,
+            },
         )
 
 
@@ -102,7 +106,7 @@ def create_url_job(body: CreateUrlJob, request: Request, user: dict = Depends(au
 
     price = _price_for(user["id"], duration)
     try:
-        _charge(user["id"], price)
+        _charge(user["id"], price, duration)
     except HTTPException:
         if prefetched_path:
             prefetched_path.unlink(missing_ok=True)
@@ -141,7 +145,7 @@ async def create_upload_job(
 
     price = _price_for(user["id"], duration)
     try:
-        _charge(user["id"], price)
+        _charge(user["id"], price, duration)
     except HTTPException:
         saved_path.unlink(missing_ok=True)
         db.update_job(job_id, status="error", error="Insufficient balance.", stage_message="Error")
