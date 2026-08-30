@@ -356,7 +356,19 @@ button[type="submit"]:disabled { opacity: 0.55; cursor: not-allowed; }
     white-space: nowrap;
 }
 #history-list a:hover { text-decoration: underline; }
-#history-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-source {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.history-meta {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
 
 .error-text { color: var(--danger); font-weight: 500; }
 

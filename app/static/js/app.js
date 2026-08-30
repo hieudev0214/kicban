@@ -183,10 +183,16 @@ async function loadHistory() {
     historyList.innerHTML = "";
     jobList.forEach((job) => {
         const li = document.createElement("li");
-        const label = document.createElement("span");
-        const durationPart = job.duration_seconds != null ? ` — ${formatDuration(job.duration_seconds)}` : "";
-        label.textContent = `${job.source_ref}${durationPart} — ${job.status}`;
-        li.appendChild(label);
+        const source = document.createElement("span");
+        source.className = "history-source";
+        source.textContent = job.source_ref;
+        li.appendChild(source);
+
+        const meta = document.createElement("span");
+        meta.className = "history-meta";
+        const durationPart = job.duration_seconds != null ? `${formatDuration(job.duration_seconds)} — ` : "";
+        meta.textContent = `${durationPart}${job.status}`;
+        li.appendChild(meta);
         if (job.status === "done") {
             const link = document.createElement("a");
             link.href = "#";
