@@ -2,8 +2,9 @@
 
 Web app: đăng ký/đăng nhập tài khoản, nạp tiền vào ví bằng chuyển khoản ngân hàng (quét mã VietQR,
 admin xác nhận thủ công), dán link video (TikTok/Facebook/URL trực tiếp) hoặc tải file video/audio lên
-để trích văn bản giọng nói (đa ngôn ngữ) qua OpenAI API. Mỗi lượt transcribe trừ một khoản phí cố định
-vào ví. Có trang quản trị (admin) để duyệt yêu cầu nạp tiền, xem user/job, cộng/trừ tiền thủ công,
+để trích văn bản giọng nói (đa ngôn ngữ) qua OpenAI API. Mỗi lượt transcribe trừ tiền vào ví theo **bậc
+thang thời lượng video** (xem mục "Bảng giá" bên dưới) - tài khoản mới được **1 lượt miễn phí** cho
+video ngắn. Có trang quản trị (admin) để duyệt yêu cầu nạp tiền, xem user/job, cộng/trừ tiền thủ công,
 khoá/xoá tài khoản.
 
 **YouTube tạm thời chưa được hỗ trợ** (YouTube chặn PO Token trên IP cloud, xem `CLAUDE.md` để biết
@@ -30,7 +31,6 @@ Sửa `.env`:
   `python -c "import secrets; print(secrets.token_hex(32))"`
 - `ADMIN_EMAILS` — email nào đăng ký/đăng nhập bằng email này sẽ tự động thành admin. Đây là cách
   duy nhất để tạo tài khoản admin đầu tiên.
-- `PRICE_PER_JOB_VND` — phí mỗi lượt transcribe (mặc định 5,000đ).
 - `BANK_ID`, `BANK_ACCOUNT_NO`, `BANK_ACCOUNT_NAME` — tài khoản ngân hàng nhận tiền nạp ví (xem mục
   bên dưới). Nếu để trống, tính năng nạp tiền sẽ bị vô hiệu hoá (nút "Nạp tiền" báo lỗi), các phần
   khác vẫn chạy bình thường.
@@ -48,6 +48,28 @@ Mở `http://localhost:8000`.
 ```bash
 uv run pytest
 ```
+
+## Bảng giá
+
+Phí transcribe tính theo **bậc thang thời lượng video** (định nghĩa trong `app/pricing.py`, không phải
+biến môi trường vì đây là cả bảng chứ không phải một con số):
+
+| Thời lượng video | Giá |
+|---|---|
+| ≤ 2 phút | 3.000đ |
+| 2–5 phút | 6.000đ |
+| 5–8 phút | 10.000đ |
+| 8–15 phút | 15.000đ |
+| 15–30 phút | 25.000đ |
+| 30–60 phút | 40.000đ |
+| 60–120 phút | 70.000đ |
+
+Mỗi bậc định giá cao hơn hẳn chi phí thật (Whisper ~$0.006/phút, tức ~150đ/phút) kể cả ở giới hạn trên
+của bậc đó, nên không bậc nào bị lỗ. Tài khoản mới được **1 lượt transcribe miễn phí** cho video ≤10
+phút (`pricing.FREE_TRIAL_MAX_SECONDS`) — nếu lượt đó lỗi, hệ thống trả lại lượt miễn phí thay vì tính
+là đã dùng.
+
+Muốn đổi giá/bậc, sửa trực tiếp `TIERS` trong `app/pricing.py` rồi deploy lại.
 
 ## Cấu hình nạp tiền (chuyển khoản thủ công + VietQR)
 

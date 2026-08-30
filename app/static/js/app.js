@@ -16,13 +16,11 @@ const topupPanel = document.getElementById("topup-panel");
 const topupBtn = document.getElementById("topup-btn");
 const topupSubmit = document.getElementById("topup-submit");
 const topupStatus = document.getElementById("topup-status");
-const priceLabel = document.getElementById("price-label");
+const freeTrialBanner = document.getElementById("free-trial-banner");
 
 let activeTab = "link";
 let pollTimer = null;
 let currentUser = null;
-
-priceLabel.textContent = `${window.__PRICE_PER_JOB_VND__.toLocaleString("vi-VN")} đ`;
 
 document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -143,7 +141,10 @@ form.addEventListener("submit", async (e) => {
     }
 
     const data = await res.json();
-    showStatus("Đã đưa vào hàng đợi...");
+    const priceMsg = data.price_vnd === 0
+        ? "Dùng lượt miễn phí"
+        : `Đã trừ ${data.price_vnd.toLocaleString("vi-VN")} đ`;
+    showStatus(`${priceMsg} — đã đưa vào hàng đợi...`);
     loadMe();
     pollJob(data.job_id);
 });
@@ -181,6 +182,7 @@ async function loadMe() {
         currentUser = null;
         navGuest.classList.remove("hidden");
         navUser.classList.add("hidden");
+        freeTrialBanner.classList.add("hidden");
         return;
     }
     currentUser = await res.json();
@@ -188,6 +190,7 @@ async function loadMe() {
     navUser.classList.remove("hidden");
     walletBalanceEl.textContent = `Số dư: ${currentUser.wallet_balance_vnd.toLocaleString("vi-VN")} đ`;
     adminLink.classList.toggle("hidden", currentUser.role !== "admin");
+    freeTrialBanner.classList.toggle("hidden", !currentUser.free_trial_available);
     loadHistory();
 }
 

@@ -27,6 +27,7 @@ def _user_public(user: dict) -> dict:
         "email": user["email"],
         "role": user["role"],
         "wallet_balance_vnd": user["wallet_balance_vnd"],
+        "free_trial_available": not user["free_trial_used"],
     }
 
 

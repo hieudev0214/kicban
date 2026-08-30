@@ -42,9 +42,8 @@ ADMIN_EMAILS = {
     if e.strip()
 }
 
-# Price charged per transcription job, deducted from the user's wallet up
-# front and refunded automatically if the job fails (see jobs.py).
-PRICE_PER_JOB_VND = int(os.environ.get("PRICE_PER_JOB_VND", "5000"))
+# Per-job price is tiered by media duration (see pricing.py), not a flat
+# amount - so there's no PRICE_PER_JOB_VND here anymore.
 MIN_TOPUP_VND = int(os.environ.get("MIN_TOPUP_VND", "10000"))
 
 # Manual bank-transfer top-up: no payment gateway account needed at all -

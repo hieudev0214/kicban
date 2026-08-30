@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 kicban is a FastAPI web app: users register/log in, top up a wallet via manual bank transfer (scan a
 VietQR code, an admin confirms and credits it - see "Manual bank-transfer top-up" below), then paste a
 video link (TikTok/Facebook/direct URL) or upload a video/audio file to get speech transcribed to text
-via the OpenAI API. Each transcription job deducts a fixed price from the user's wallet, refunded
-automatically if the job fails. There's an admin panel (`/admin`) to approve/reject top-up requests,
+via the OpenAI API. Each transcription job deducts a price tiered by media duration from the user's
+wallet (see "Wallet & pricing" below), refunded automatically if the job fails. A new account's first
+job is free (short videos only). There's an admin panel (`/admin`) to approve/reject top-up requests,
 view users/jobs, manually adjust wallet balances, and lock/delete accounts.
 
 **No payment gateway (VNPay, MoMo, PayOS, ...) is integrated, and this was a deliberate choice, not an
@@ -69,12 +70,33 @@ immediately without waiting for the session to expire. `require_user`/`require_a
 checked on both register and login; a matching email is promoted to `role="admin"` on the spot. This
 is the only way to create the first admin account.
 
-**Wallet & pricing**: `PRICE_PER_JOB_VND` is charged per job via `db.try_charge_wallet`, which does the
-balance-check-and-deduct as one operation under `db.py`'s existing write lock - this closes the race
-where two concurrent job submissions could both pass a balance check before either deduction lands.
-Charging happens *before* the job runs (`routes/api.py`), and `jobs.py`'s `_run_job` refunds
-`job["price_vnd"]` back to the wallet automatically on any failure path (`MediaError`/`AudioError` or
-an unhandled exception) - so a user is only ever charged for a job that actually produced a transcript.
+**Wallet & pricing** (`pricing.py`): price is **tiered by media duration**, not a flat amount - `TIERS`
+is a hardcoded list of `(upper_bound_seconds, price_vnd)` pairs (e.g. ≤2 min = 3,000đ, up to ≤120 min =
+70,000đ, matching `MAX_DURATION_SECONDS`). This replaced an earlier flat `PRICE_PER_JOB_VND`: Whisper's
+real cost scales with audio length (~$0.006/min), so one flat price either overcharged short clips or
+lost money on long ones (a 2-hour video cost ~18,000đ to transcribe but a flat 5,000đ charge wouldn't
+cover it). Each tier is priced well above its worst-case cost, so no tier can lose money even at its
+upper bound. `routes/api.py` determines the price **before** charging: for a URL job it calls
+`media.probe_url` (cheap yt-dlp metadata fetch, no download) to get the duration up front - this makes
+job creation noticeably slower than before (a real network call instead of just DB writes), a deliberate
+trade for accurate pricing; for an upload it runs `audio.probe` (ffprobe) on the already-saved file. If
+duration can't be determined at charge time (a URL probe failure), `pricing.price_for_duration_seconds`
+falls back to the highest tier as a safe upper bound, and `jobs.py`'s `_reconcile_price` (called after
+the pipeline's own post-download duration check) refunds the difference once the real duration is known
+- charging conservatively high and refunding down is simpler and safer than trying to collect more from
+the wallet mid-job. `try_charge_wallet` does the balance-check-and-deduct as one operation under `db.py`'s
+existing write lock - this closes the race where two concurrent job submissions could both pass a
+balance check before either deduction lands. `jobs.py`'s `_refund` refunds `job["price_vnd"]` back to
+the wallet automatically on any failure path (`MediaError`/`AudioError` or an unhandled exception) - so
+a user is only ever charged for a job that actually produced a transcript.
+
+**Free trial**: a brand-new account gets one free transcription (`users.free_trial_used`, consumed
+atomically by `db.try_use_free_trial` under the write lock so two simultaneous "first" jobs can't both
+claim it), capped to videos ≤ `pricing.FREE_TRIAL_MAX_SECONDS` (10 min) so it can't be used to get a
+long - and therefore costly to us - job for free. If that free job fails, `_refund` calls
+`db.restore_free_trial` to give the trial back rather than burning it on a job that produced nothing,
+mirroring the paid-refund policy above. `/api/auth/me` exposes `free_trial_available` so the frontend
+can show a banner.
 
 **Manual bank-transfer top-up** (`vietqr.py` + `routes/wallet.py` + the `topups` table): `POST
 /api/wallet/topup-request` creates a `topups` row (`status="pending"`) and generates a short unique
@@ -149,7 +171,7 @@ only support plain `json` and come back as one synthetic zero-timestamp segment.
 **Storage**: SQLite at `data/jobs.db` (single connection, `check_same_thread=False`, guarded by a
 module-level `threading.Lock` in `db.py` - every write goes through that lock, including
 `try_charge_wallet`'s check-and-deduct, which is why it's race-safe). Three tables: `users`
-(email/password_hash/role/wallet_balance_vnd/is_locked), `topups` (manual top-up requests, keyed by a
+(email/password_hash/role/wallet_balance_vnd/is_locked/free_trial_used), `topups` (manual top-up requests, keyed by a
 unique `note` - the bank transfer content string - with `status` pending/approved/rejected), and `jobs`
 (now with `user_id` and `price_vnd`).
 There are no migrations - schema changes are hand-edited `CREATE TABLE IF NOT EXISTS` statements, plus

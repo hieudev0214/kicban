@@ -86,6 +86,7 @@ def init_db() -> None:
         )
         _add_column_if_missing(conn, "jobs", "user_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "jobs", "price_vnd", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "users", "free_trial_used", "INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
 
@@ -166,6 +167,32 @@ def adjust_wallet_balance(user_id: str, delta_vnd: int) -> None:
             "UPDATE users SET wallet_balance_vnd = wallet_balance_vnd + ? WHERE id = ?",
             (delta_vnd, user_id),
         )
+        conn.commit()
+
+
+def try_use_free_trial(user_id: str) -> bool:
+    """Atomically consume the user's one free first transcription, returning
+    False if it was already used. Runs under the same write lock as every
+    other mutation so two simultaneous "first" jobs can't both claim it."""
+    conn = get_connection()
+    with _lock:
+        row = conn.execute(
+            "SELECT free_trial_used FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if row is None or row["free_trial_used"]:
+            return False
+        conn.execute("UPDATE users SET free_trial_used = 1 WHERE id = ?", (user_id,))
+        conn.commit()
+        return True
+
+
+def restore_free_trial(user_id: str) -> None:
+    """Give the free trial back after the job that consumed it failed - a
+    user should only spend their one free try on a job that actually
+    produced a transcript, same principle as the paid-job refund below."""
+    conn = get_connection()
+    with _lock:
+        conn.execute("UPDATE users SET free_trial_used = 0 WHERE id = ?", (user_id,))
         conn.commit()
 
 

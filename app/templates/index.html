@@ -15,7 +15,20 @@
 
 <h1>kicban — Video → Text</h1>
 <p class="subtitle">Dán link video (TikTok/Facebook/URL trực tiếp) hoặc tải file lên để trích văn bản giọng nói.</p>
-<p class="subtitle">YouTube tạm thời chưa được hỗ trợ. Mỗi lượt transcribe tốn <strong id="price-label"></strong>.</p>
+<p class="subtitle">YouTube tạm thời chưa được hỗ trợ.</p>
+
+<p id="free-trial-banner" class="free-trial-banner hidden">
+    🎁 Bạn còn 1 lượt transcribe <strong>miễn phí</strong> cho video ≤ {{ free_trial_max_minutes }} phút!
+</p>
+
+<div class="price-tiers">
+    <p class="subtitle">Phí tính theo thời lượng video:</p>
+    <ul>
+        {% for label, price in price_tiers %}
+        <li><span>{{ label }}</span><strong>{{ "{:,}".format(price) }} đ</strong></li>
+        {% endfor %}
+    </ul>
+</div>
 
 <div id="topup-panel" class="hidden">
     <h2>Nạp tiền vào ví</h2>
@@ -93,6 +106,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.__PRICE_PER_JOB_VND__ = {{ price_per_job_vnd }};</script>
 <script src="/static/js/app.js"></script>
 {% endblock %}

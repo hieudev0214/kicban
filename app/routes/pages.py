@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Request
 from fastapi.templating import Jinja2Templates
 
-from app.config import BASE_DIR, PRICE_PER_JOB_VND
+from app import pricing
+from app.config import BASE_DIR
 from app.transcribe import LANGUAGE_CHOICES
 
 router = APIRouter()
@@ -15,7 +16,8 @@ def index(request: Request):
         "index.html",
         {
             "languages": LANGUAGE_CHOICES,
-            "price_per_job_vnd": PRICE_PER_JOB_VND,
+            "price_tiers": pricing.tier_display(),
+            "free_trial_max_minutes": pricing.FREE_TRIAL_MAX_SECONDS // 60,
         },
     )
 
