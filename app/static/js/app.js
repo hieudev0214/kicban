@@ -41,13 +41,13 @@ function stopPolling() {
 }
 
 function formatDuration(seconds) {
-    if (seconds === null || seconds === undefined) return "Không xác định được thời lượng video";
+    if (seconds === null || seconds === undefined) return null;
     const total = Math.round(seconds);
     const m = Math.floor(total / 60);
     const s = total % 60;
-    if (m === 0) return `Video dài ${s} giây`;
-    if (s === 0) return `Video dài ${m} phút`;
-    return `Video dài ${m} phút ${s} giây`;
+    if (m === 0) return `${s} giây`;
+    if (s === 0) return `${m} phút`;
+    return `${m} phút ${s} giây`;
 }
 
 function showStatus(text, isError = false, inProgress = true) {
@@ -153,7 +153,9 @@ form.addEventListener("submit", async (e) => {
     }
 
     const data = await res.json();
-    const durationMsg = formatDuration(data.duration_seconds);
+    const durationMsg = data.duration_seconds != null
+        ? `Video dài ${formatDuration(data.duration_seconds)}`
+        : "Không xác định được thời lượng video";
     const priceMsg = data.price_vnd === 0
         ? "dùng lượt miễn phí"
         : `đã trừ ${data.price_vnd.toLocaleString("vi-VN")} đ`;
@@ -171,7 +173,8 @@ async function loadHistory() {
     jobList.forEach((job) => {
         const li = document.createElement("li");
         const label = document.createElement("span");
-        label.textContent = `${job.source_ref} — ${job.status}`;
+        const durationPart = job.duration_seconds != null ? ` — ${formatDuration(job.duration_seconds)}` : "";
+        label.textContent = `${job.source_ref}${durationPart} — ${job.status}`;
         li.appendChild(label);
         if (job.status === "done") {
             const link = document.createElement("a");
