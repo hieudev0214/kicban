@@ -2,6 +2,7 @@ const form = document.getElementById("job-form");
 const submitBtn = document.getElementById("submit-btn");
 const statusPanel = document.getElementById("status-panel");
 const statusText = document.getElementById("status-text");
+const statusSpinner = document.getElementById("status-spinner");
 const resultPanel = document.getElementById("result-panel");
 const transcriptText = document.getElementById("transcript-text");
 const detectedLanguage = document.getElementById("detected-language");
@@ -39,10 +40,11 @@ function stopPolling() {
     }
 }
 
-function showStatus(text, isError = false) {
+function showStatus(text, isError = false, inProgress = true) {
     statusPanel.classList.remove("hidden");
     statusText.textContent = text;
     statusText.className = isError ? "error-text" : "";
+    statusSpinner.classList.toggle("hidden", !inProgress);
 }
 
 function showResult(job) {
@@ -60,21 +62,21 @@ async function pollJob(jobId) {
         const res = await fetch(`/api/jobs/${jobId}`);
         if (!res.ok) {
             stopPolling();
-            showStatus("Không thể lấy trạng thái job.", true);
+            showStatus("Không thể lấy trạng thái job.", true, false);
             submitBtn.disabled = false;
             return;
         }
         const job = await res.json();
         if (job.status === "done") {
             stopPolling();
-            showStatus("Hoàn tất.");
+            showStatus("Hoàn tất.", false, false);
             showResult(job);
             submitBtn.disabled = false;
             loadHistory();
             loadMe();
         } else if (job.status === "error") {
             stopPolling();
-            showStatus(job.error || "Đã có lỗi xảy ra.", true);
+            showStatus(job.error || "Đã có lỗi xảy ra.", true, false);
             submitBtn.disabled = false;
             loadHistory();
             loadMe();
@@ -101,7 +103,7 @@ form.addEventListener("submit", async (e) => {
         if (activeTab === "link") {
             const url = document.getElementById("url-input").value.trim();
             if (!url) {
-                showStatus("Vui lòng nhập link video.", true);
+                showStatus("Vui lòng nhập link video.", true, false);
                 submitBtn.disabled = false;
                 return;
             }
@@ -113,7 +115,7 @@ form.addEventListener("submit", async (e) => {
         } else {
             const fileInput = document.getElementById("file-input");
             if (!fileInput.files.length) {
-                showStatus("Vui lòng chọn file.", true);
+                showStatus("Vui lòng chọn file.", true, false);
                 submitBtn.disabled = false;
                 return;
             }
@@ -123,7 +125,7 @@ form.addEventListener("submit", async (e) => {
             res = await fetch("/api/jobs/upload", { method: "POST", body: formData });
         }
     } catch (err) {
-        showStatus("Không thể kết nối tới server.", true);
+        showStatus("Không thể kết nối tới server.", true, false);
         submitBtn.disabled = false;
         return;
     }
@@ -135,7 +137,7 @@ form.addEventListener("submit", async (e) => {
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        showStatus(err.detail || "Yêu cầu không hợp lệ.", true);
+        showStatus(err.detail || "Yêu cầu không hợp lệ.", true, false);
         submitBtn.disabled = false;
         return;
     }
@@ -166,7 +168,7 @@ async function loadHistory() {
             link.textContent = "Xem";
             link.addEventListener("click", (e) => {
                 e.preventDefault();
-                showStatus("Hoàn tất.");
+                showStatus("Hoàn tất.", false, false);
                 statusPanel.classList.remove("hidden");
                 showResult(job);
             });

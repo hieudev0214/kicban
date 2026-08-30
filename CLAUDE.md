@@ -8,20 +8,21 @@ kicban is a FastAPI web app: users register/log in, top up a wallet via manual b
 VietQR code, an admin confirms and credits it - see "Manual bank-transfer top-up" below), then paste a
 video link (TikTok/Facebook/direct URL) or upload a video/audio file to get speech transcribed to text
 via the OpenAI API. Each transcription job deducts a price tiered by media duration from the user's
-wallet (see "Wallet & pricing" below), refunded automatically if the job fails. A new account's first
-job is free (short videos only). There's an admin panel (`/admin`) to approve/reject top-up requests,
-view users/jobs, manually adjust wallet balances, and lock/delete accounts.
+wallet (see "Wallet & pricing" below), refunded automatically if the job fails. A brand-new account's
+first job is free (short videos only - see "Free trial"). There's an admin panel (`/admin`) to
+approve/reject top-up requests, view users/jobs, manually adjust wallet balances, and lock/delete
+accounts.
 
 **No payment gateway (VNPay, MoMo, PayOS, ...) is integrated, and this was a deliberate choice, not an
 oversight**: every one of them requires identity/business-verified merchant onboarding before issuing
 API credentials (an AML/KYC legal requirement, not something any provider can skip), which blocked
 getting the app usable quickly. A VNPay integration (`vnpay.py`, HMAC-SHA512 signed URLs + IPN webhook)
-was built and verified working end-to-end in an earlier pass of this session, then deleted once VNPay's
+was built and verified working end-to-end in an earlier pass of this project, then deleted once VNPay's
 merchant sandbox registration turned out to be stuck in an identity-verification flow with no clear
-self-service path. If a payment gateway is wanted again later, that VNPay algorithm write-up is still
-useful reference (see git history for `vnpay.py` / `tests/test_vnpay.py`), but don't assume it's what
-the user wants without asking - the manual flow was a deliberate fallback, not a stopgap to silently
-replace.
+self-service path (a PayOS attempt hit a similar dead end). If a payment gateway is wanted again later,
+that VNPay algorithm write-up is still useful reference (see git history for `vnpay.py` /
+`tests/test_vnpay.py`), but don't assume it's what the user wants without asking - the manual flow was
+a deliberate fallback, not a stopgap to silently replace.
 
 **YouTube is temporarily unsupported** — blocked at the API layer (`routes/api.py`'s `_reject_youtube`)
 because YouTube enforces a PO Token requirement on datacenter IPs that this app doesn't yet work
@@ -39,13 +40,16 @@ uv sync                                    # install deps (pins Python 3.12 via 
 cp .env.example .env                       # then edit OPENAI_API_KEY / SECRET_KEY / ADMIN_EMAILS / BANK_*
 uv run uvicorn app.main:app --reload       # run dev server -> http://localhost:8000
 uv run pytest                              # run all tests
+uv run pytest tests/test_auth.py -v        # run a single test file
+uv run pytest tests/test_auth.py::test_hash_password_verifies_correct_password  # run a single test
 docker build -t kicban .                   # build production image
 docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... -e SECRET_KEY=... kicban
 ```
 
-System requirements: `ffmpeg`/`ffprobe` on PATH (audio extraction/probing). `OPENAI_API_KEY` is
-mandatory now (no local fallback). `SECRET_KEY` must be a long random value in production - it signs
-session cookies, so a leaked/default value lets anyone forge a login session.
+System requirements: `ffmpeg`/`ffprobe` on PATH (audio extraction/probing, and now also duration-based
+price quoting for uploads - see "Wallet & pricing"). `OPENAI_API_KEY` is mandatory now (no local
+fallback). `SECRET_KEY` must be a long random value in production - it signs session cookies, so a
+leaked/default value lets anyone forge a login session.
 
 ## Architecture
 
@@ -54,8 +58,10 @@ via Jinja2 templates; `routes/api.py` exposes `/api/jobs` (create by URL or uplo
 download `.txt`/`.srt`) - all gated behind login; `routes/auth.py` exposes `/api/auth/*`
 (register/login/logout/me); `routes/wallet.py` exposes `/api/wallet/*` (create a top-up request + get
 its VietQR code, list the current user's own top-up history); `routes/admin.py` exposes `/api/admin/*`
-(admin-only user management, plus listing/approving/rejecting top-up requests). Job creation returns
-immediately (202) with a `job_id` - the frontend polls `GET /api/jobs/{id}` for status.
+(admin-only user management, plus listing/approving/rejecting top-up requests). Job creation is not
+instant - it synchronously determines the job's price before responding (see "Wallet & pricing") - but
+still returns well before the media is fetched/transcribed: a 202 with a `job_id` and the `price_vnd`
+that was actually charged, and the frontend polls `GET /api/jobs/{id}` for status.
 
 **Auth** (`auth.py`): passwords are hashed with `bcrypt`. Sessions are a single signed cookie
 (`itsdangerous.URLSafeTimedSerializer`, `SECRET_KEY`-keyed, `SESSION_MAX_AGE_SECONDS` = 30 days) -
@@ -68,35 +74,45 @@ immediately without waiting for the session to expire. `require_user`/`require_a
 
 **Admin bootstrap**: there's no "create admin" UI or CLI - `ADMIN_EMAILS` (comma-separated env var) is
 checked on both register and login; a matching email is promoted to `role="admin"` on the spot. This
-is the only way to create the first admin account.
+is the only way to create the first admin account. On Render this means setting `ADMIN_EMAILS` in the
+service's Environment tab, then either registering fresh with that email or logging out and back in on
+an existing account (login re-checks and promotes on every sign-in).
 
 **Wallet & pricing** (`pricing.py`): price is **tiered by media duration**, not a flat amount - `TIERS`
-is a hardcoded list of `(upper_bound_seconds, price_vnd)` pairs (e.g. ≤2 min = 3,000đ, up to ≤120 min =
-70,000đ, matching `MAX_DURATION_SECONDS`). This replaced an earlier flat `PRICE_PER_JOB_VND`: Whisper's
-real cost scales with audio length (~$0.006/min), so one flat price either overcharged short clips or
-lost money on long ones (a 2-hour video cost ~18,000đ to transcribe but a flat 5,000đ charge wouldn't
-cover it). Each tier is priced well above its worst-case cost, so no tier can lose money even at its
-upper bound. `routes/api.py` determines the price **before** charging: for a URL job it calls
-`media.probe_url` (cheap yt-dlp metadata fetch, no download) to get the duration up front - this makes
-job creation noticeably slower than before (a real network call instead of just DB writes), a deliberate
-trade for accurate pricing; for an upload it runs `audio.probe` (ffprobe) on the already-saved file. If
-duration can't be determined at charge time (a URL probe failure), `pricing.price_for_duration_seconds`
-falls back to the highest tier as a safe upper bound, and `jobs.py`'s `_reconcile_price` (called after
-the pipeline's own post-download duration check) refunds the difference once the real duration is known
-- charging conservatively high and refunding down is simpler and safer than trying to collect more from
-the wallet mid-job. `try_charge_wallet` does the balance-check-and-deduct as one operation under `db.py`'s
-existing write lock - this closes the race where two concurrent job submissions could both pass a
-balance check before either deduction lands. `jobs.py`'s `_refund` refunds `job["price_vnd"]` back to
-the wallet automatically on any failure path (`MediaError`/`AudioError` or an unhandled exception) - so
-a user is only ever charged for a job that actually produced a transcript.
+is a hardcoded list of `(upper_bound_seconds, price_vnd)` pairs (≤2 min = 3,000đ, 2–5 min = 6,000đ,
+5–8 min = 10,000đ, 8–15 min = 15,000đ, 15–30 min = 25,000đ, 30–60 min = 40,000đ, 60–120 min = 70,000đ -
+the last bound matches `MAX_DURATION_SECONDS`). This replaced an earlier flat `PRICE_PER_JOB_VND`:
+Whisper's real cost scales with audio length (~$0.006/min, roughly 150đ/min), so one flat price either
+overcharged short clips or lost money on long ones (a 2-hour video costs ~18,000đ to transcribe but a
+flat 5,000đ charge wouldn't cover it). Each tier is priced well above its own worst-case cost, so no
+tier can lose money even at its upper bound. Changing the price table means editing `TIERS` in code and
+redeploying - it is deliberately not an env var, since it's a whole table rather than a single number.
+
+`routes/api.py` determines the price **before** charging, which is a real behavior change worth
+knowing: for a URL job it calls `media.probe_url` (a cheap yt-dlp metadata fetch, no download) to get
+the duration synchronously inside the request handler - this makes job creation noticeably slower than
+a bare DB write (a real network round-trip to TikTok/Facebook/etc.), a deliberate trade for accurate
+upfront pricing. For an upload it runs `audio.probe` (ffprobe) on the already-saved file before
+charging. If duration can't be determined at charge time (the URL probe failed - `probe_url` swallows
+all errors and returns `None`), `pricing.price_for_duration_seconds(None)` falls back to the highest
+tier as a safe upper bound, and `jobs.py`'s `_reconcile_price` (called right after the pipeline's own
+post-download duration re-check) refunds the difference once the real duration is known. Charging
+conservatively high and refunding down is simpler and safer than trying to collect more from the wallet
+mid-job if a low estimate turns out to be wrong - `_reconcile_price` therefore only ever refunds, never
+charges more. `db.try_charge_wallet` does the balance-check-and-deduct as one operation under `db.py`'s
+existing write lock, closing the race where two concurrent job submissions could both pass a balance
+check before either deduction lands. `jobs.py`'s `_refund` refunds `job["price_vnd"]` back to the
+wallet automatically on any failure path (`MediaError`/`AudioError` or an unhandled exception) - so a
+user is only ever charged for a job that actually produced a transcript.
 
 **Free trial**: a brand-new account gets one free transcription (`users.free_trial_used`, consumed
 atomically by `db.try_use_free_trial` under the write lock so two simultaneous "first" jobs can't both
 claim it), capped to videos ≤ `pricing.FREE_TRIAL_MAX_SECONDS` (10 min) so it can't be used to get a
-long - and therefore costly to us - job for free. If that free job fails, `_refund` calls
-`db.restore_free_trial` to give the trial back rather than burning it on a job that produced nothing,
-mirroring the paid-refund policy above. `/api/auth/me` exposes `free_trial_available` so the frontend
-can show a banner.
+long - and therefore costly to us - job for free; a job whose duration is unknown at charge time is
+never treated as free-trial-eligible for the same reason. If that free job fails, `jobs.py`'s `_refund`
+calls `db.restore_free_trial` to give the trial back rather than burning it on a job that produced
+nothing, mirroring the paid-refund policy above. `/api/auth/me` exposes `free_trial_available` so the
+frontend can show a banner ("index.html"'s `#free-trial-banner`).
 
 **Manual bank-transfer top-up** (`vietqr.py` + `routes/wallet.py` + the `topups` table): `POST
 /api/wallet/topup-request` creates a `topups` row (`status="pending"`) and generates a short unique
@@ -112,26 +128,31 @@ checking `status == "pending"` first. `MANUAL_TOPUP_ENABLED` (config.py) is deri
 `BANK_ID`/`BANK_ACCOUNT_NO`/`BANK_ACCOUNT_NAME` all being set - topup-request is a plain 400 if any are
 missing rather than generating a QR pointing at nothing.
 
-**Job pipeline** (`jobs.py` → `media.py` → `audio.py` → `transcribe.py`, state in `db.py`): jobs now
-all go through one `ThreadPoolExecutor` (`_job_pool`, 3 workers) - there's no more GPU-bound local
-queue to serialize around now that faster-whisper is gone. `_run_job` drives fetch media
-(`media.fetch_url` for URLs, or the already-saved upload path) → `audio.normalize_to_wav` (ffmpeg,
-extracts mono 16kHz PCM) → re-check duration against `MAX_DURATION_SECONDS` → `transcribe.get_transcriber()`
-(always `OpenAITranscriber`) → write transcript/segments/status back via `db.update_job`, refunding the
-job's price on any failure (see "Wallet & pricing" above). Errors are split into two tiers: known
-`MediaError`/`AudioError` write their message straight to the job (user-facing); anything else is
-logged with `exc_info` and a generic message is stored instead, so internals never leak to the client.
+**Job pipeline** (`jobs.py` → `media.py` → `audio.py` → `transcribe.py`, state in `db.py`): jobs go
+through one `ThreadPoolExecutor` (`_job_pool`, 3 workers) - there's no GPU-bound local queue to
+serialize around now that faster-whisper is gone. `_run_job` drives fetch media (`media.fetch_url` for
+URLs, or the already-saved upload path) → `audio.normalize_to_wav` (ffmpeg, extracts mono 16kHz PCM) →
+re-check duration against `MAX_DURATION_SECONDS` → `_reconcile_price` (see "Wallet & pricing") →
+`transcribe.get_transcriber()` (always `OpenAITranscriber`) → write transcript/segments/status back via
+`db.update_job`, refunding/restoring the free trial on any failure (see "Wallet & pricing" and "Free
+trial" above). Errors are split into two tiers: known `MediaError`/`AudioError` write their message
+straight to the job (user-facing); anything else is logged with `exc_info` and a generic message is
+stored instead, so internals never leak to the client.
 
 **Media fetch** (`media.py`): `fetch_url` first does a cheap `probe_url` (yt-dlp, `skip_download`) for
 an early duration check - a probe failure is *not* treated as "unsupported," since that used to cause
-a broken fallback that downloaded raw HTML as if it were a media file. It then tries `download_via_ytdlp`;
-if that fails, `_is_known_site` checks whether a non-generic yt-dlp extractor recognizes the URL - if so
-the yt-dlp error is re-raised as-is (real failure, not an unsupported link), otherwise it falls back to
-`download_direct_url` (plain `httpx` GET, only accepted if the response `Content-Type` is video/audio/
-octet-stream). This distinction matters: don't collapse these two failure paths back together.
-**YouTube URLs never reach this module** in the current build - they're rejected earlier in
-`routes/api.py` with a "temporarily unsupported" message, so the YouTube-specific code below is dead
-in production but intentionally not deleted.
+a broken fallback that downloaded raw HTML as if it were a media file. This same `probe_url` is now
+also called separately and earlier, from `routes/api.py`, purely to quote a price before charging (see
+"Wallet & pricing") - so a URL job's duration typically gets probed twice (once for pricing, once
+inside `fetch_url` for the actual fetch); that's an accepted minor inefficiency rather than something
+worth threading a cached result through the job record for. After probing, `fetch_url` tries
+`download_via_ytdlp`; if that fails, `_is_known_site` checks whether a non-generic yt-dlp extractor
+recognizes the URL - if so the yt-dlp error is re-raised as-is (real failure, not an unsupported link),
+otherwise it falls back to `download_direct_url` (plain `httpx` GET, only accepted if the response
+`Content-Type` is video/audio/octet-stream). This distinction matters: don't collapse these two failure
+paths back together. **YouTube URLs never reach this module** in the current build - they're rejected
+earlier in `routes/api.py` with a "temporarily unsupported" message, so the YouTube-specific code below
+is dead in production but intentionally not deleted.
 
 **Cookies for yt-dlp**: cloud/datacenter IPs get bot-blocked by TikTok, so production deployments set
 `YTDLP_COOKIES_FILE` to a Netscape-format cookies file — `_cookies_source_for` picks it (or
@@ -147,12 +168,12 @@ to yt-dlp.
 
 **YouTube PO Token** (dormant, see above): `_ytdlp_base_opts` forces `extractor_args.youtube.player_client`
 to try `android`/`ios` before `web`, because YouTube's web client requires a PO Token that yt-dlp can't
-obtain from a datacenter IP without a separate token-provider service. Verified in practice (this
-session) that this mitigation is *insufficient on its own* on a datacenter IP: extraction succeeds but
-the actual format/media URL still gets rejected with "Requested format is not available" once YouTube
-enforces PO Token on the fallback format too - confirmed both with and without real YouTube cookies. A
-real fix needs a PO token provider (e.g. `bgutil-ytdlp-pot-provider`), which is nontrivial to deploy
-alongside this app (needs a Node.js sidecar/service - either bundled into the Docker image, which risks
+obtain from a datacenter IP without a separate token-provider service. Verified in practice that this
+mitigation is *insufficient on its own* on a datacenter IP: extraction succeeds but the actual
+format/media URL still gets rejected with "Requested format is not available" once YouTube enforces PO
+Token on the fallback format too - confirmed both with and without real YouTube cookies. A real fix
+needs a PO token provider (e.g. `bgutil-ytdlp-pot-provider`), which is nontrivial to deploy alongside
+this app (needs a Node.js sidecar/service - either bundled into the Docker image, which risks
 native-dependency breakage from the `canvas` npm package, or run as a second paid Render service) and
 has not been added; that tradeoff (extra cost + complexity vs. YouTube support) is a product decision,
 not a technical one, so don't just wire it in - check with the user first.
@@ -170,22 +191,37 @@ only support plain `json` and come back as one synthetic zero-timestamp segment.
 
 **Storage**: SQLite at `data/jobs.db` (single connection, `check_same_thread=False`, guarded by a
 module-level `threading.Lock` in `db.py` - every write goes through that lock, including
-`try_charge_wallet`'s check-and-deduct, which is why it's race-safe). Three tables: `users`
-(email/password_hash/role/wallet_balance_vnd/is_locked/free_trial_used), `topups` (manual top-up requests, keyed by a
-unique `note` - the bank transfer content string - with `status` pending/approved/rejected), and `jobs`
-(now with `user_id` and `price_vnd`).
-There are no migrations - schema changes are hand-edited `CREATE TABLE IF NOT EXISTS` statements, plus
-a small `_add_column_if_missing` helper (best-effort `ALTER TABLE`, swallows "duplicate column") used
-when a column was added to a table that already existed on someone's disk; this only matters for a
-persisted local `data/jobs.db` since Render's free-tier disk is ephemeral and gets a fresh schema on
-every redeploy anyway. **Once real users have real money in their wallets, losing this file on
-redeploy is a real problem** - a persistent disk becomes necessary at that point, not optional. Working
-files live under `data/` (`uploads/`, `downloads/`, `audio/`) and are named by `job_id`.
+`try_charge_wallet`'s check-and-deduct and `try_use_free_trial`'s check-and-set, which is why they're
+race-safe). Three tables: `users` (email/password_hash/role/wallet_balance_vnd/is_locked/
+free_trial_used), `topups` (manual top-up requests, keyed by a unique `note` - the bank transfer
+content string - with `status` pending/approved/rejected), and `jobs` (user_id/price_vnd plus the usual
+status/transcript/segments fields). There are no migrations - schema changes are hand-edited
+`CREATE TABLE IF NOT EXISTS` statements, plus a small `_add_column_if_missing` helper (best-effort
+`ALTER TABLE`, swallows "duplicate column") used when a column was added to a table that already
+existed on someone's disk; this only matters for a persisted local `data/jobs.db` since Render's
+free-tier disk is ephemeral and gets a fresh schema on every redeploy anyway. **Once real users have
+real money in their wallets, losing this file on redeploy is a real problem** - a persistent disk
+becomes necessary at that point, not optional. Working files live under `data/` (`uploads/`,
+`downloads/`, `audio/`) and are named by `job_id`.
 
 **Config** (`config.py`): all environment-derived settings live here as module-level globals, loaded
 once via `load_dotenv()` at import time. `OPENAI_ENABLED`/`MANUAL_TOPUP_ENABLED` gate whether those
 features work at all, derived from whether their required env vars are set rather than a separate flag.
+Pricing is *not* here - it's hardcoded in `pricing.py` (see "Wallet & pricing").
 
 **Rate limiting** (`ratelimit.py`): in-memory per-IP sliding window (`MAX_JOBS_PER_HOUR_PER_IP`,
 default 5/hour), kept as a secondary spam guard alongside the wallet-balance check - state is a plain
 dict guarded by a lock, resets on process restart, and does not work across multiple server instances.
+
+**Frontend/UI** (`static/css/style.css`, `templates/base.html`): a glassmorphism/gradient redesign -
+translucent `backdrop-filter` panels, an animated "aurora" background (three blurred gradient blobs
+that slowly drift via CSS keyframes, defined in `base.html`/`style.css` and present on every page), a
+pill-style tab switcher, and fade-in transitions on newly-shown panels. Element IDs referenced by
+`app.js`/`admin.js`/`login.js`/`register.js` were deliberately kept unchanged during this redesign, so
+JS logic and markup structure/IDs are decoupled from styling - restyling further should keep doing the
+same (check which IDs a script depends on before renaming or restructuring markup around them). Native
+`<select>` dropdown popups don't inherit the page's translucent theming (they render as a solid,
+browser-controlled popup), so `<option>` needs its own explicit `background-color`/`color` per
+color-scheme in `style.css` or its text can render illegibly (near-invisible light text on the browser's
+default white popup) - this was hit and fixed once already, don't reintroduce it by removing those
+rules.
