@@ -201,6 +201,19 @@ def download_direct_url(url: str, job_id: str) -> Path:
     return dest
 
 
+def download_media(url: str, job_id: str) -> Path:
+    """Download only, no duration check - split out of fetch_url so a caller
+    that already knows the probe can't determine this URL's duration (see
+    routes/api.py) can download straight to disk and measure the real
+    duration with ffprobe afterward, instead of guessing a price up front."""
+    try:
+        return download_via_ytdlp(url, job_id)
+    except MediaError:
+        if _is_known_site(url):
+            raise
+        return download_direct_url(url, job_id)
+
+
 def fetch_url(url: str, job_id: str, known_duration: float | None = None) -> Path:
     """`known_duration` lets a caller that already probed this URL (routes/api.py
     does, to quote a price before charging) skip probing it again here - probe_url
@@ -214,12 +227,7 @@ def fetch_url(url: str, job_id: str, known_duration: float | None = None) -> Pat
     if duration and duration > MAX_DURATION_SECONDS:
         raise VideoTooLongError(duration)
 
-    try:
-        return download_via_ytdlp(url, job_id)
-    except MediaError:
-        if _is_known_site(url):
-            raise
-        return download_direct_url(url, job_id)
+    return download_media(url, job_id)
 
 
 async def save_upload(upload_file, job_id: str, max_bytes: int) -> Path:

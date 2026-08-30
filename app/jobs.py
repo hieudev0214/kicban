@@ -65,7 +65,12 @@ def _run_job(job_id: str) -> None:
     try:
         db.update_job(job_id, status="fetching", stage_message=STAGE_FETCHING)
 
-        if job["source_type"] == "url":
+        if job.get("prefetched_path"):
+            # routes/api.py already downloaded this one to measure its real
+            # duration before charging (the cheap metadata probe couldn't
+            # determine it up front) - don't fetch it a second time.
+            media_path = Path(job["prefetched_path"])
+        elif job["source_type"] == "url":
             media_path = fetch_url(job["source_ref"], job_id, known_duration=job.get("duration_seconds"))
         else:
             media_path = Path(job["source_ref"])

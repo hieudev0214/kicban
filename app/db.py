@@ -80,6 +80,7 @@ def init_db() -> None:
                 segments_json TEXT,
                 price_vnd INTEGER NOT NULL DEFAULT 0,
                 duration_seconds REAL,
+                prefetched_path TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -88,6 +89,7 @@ def init_db() -> None:
         _add_column_if_missing(conn, "jobs", "user_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "jobs", "price_vnd", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(conn, "jobs", "duration_seconds", "REAL")
+        _add_column_if_missing(conn, "jobs", "prefetched_path", "TEXT")
         _add_column_if_missing(conn, "users", "free_trial_used", "INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 

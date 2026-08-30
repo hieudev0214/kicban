@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
@@ -6,7 +8,7 @@ from app import auth, db, jobs, pricing, ratelimit
 from app.audio import AudioError, probe as probe_audio
 from app.config import MAX_DURATION_SECONDS, MAX_UPLOAD_BYTES
 from app.exporters import to_srt, to_txt
-from app.media import MediaError, probe_url, save_upload
+from app.media import MediaError, download_media, probe_url, save_upload
 from app.transcribe import Segment
 
 router = APIRouter(prefix="/api/jobs")
@@ -73,9 +75,46 @@ def create_url_job(body: CreateUrlJob, request: Request, user: dict = Depends(au
             400, f"Video is longer than the {MAX_DURATION_SECONDS // 60} minute limit for this tool."
         )
 
+    job_id = db.create_job(user["id"], "url", url, body.language, 0)
+    prefetched_path: Path | None = None
+
+    if duration is None:
+        # The cheap metadata probe couldn't determine the duration even
+        # after retries (TikTok's bot-challenge can outright block it) -
+        # rather than charging a pessimistic highest-tier estimate and
+        # possibly rejecting someone who can actually afford the real
+        # (lower) price, download the media now - no OpenAI cost yet, only
+        # server bandwidth - so ffprobe can measure it exactly before
+        # anything is charged.
+        try:
+            prefetched_path = download_media(url, job_id)
+        except MediaError as e:
+            db.update_job(job_id, status="error", error=str(e), stage_message="Error")
+            raise HTTPException(400, str(e)) from e
+        try:
+            duration = probe_audio(prefetched_path)["duration"]
+        except AudioError:
+            duration = None
+        if duration and duration > MAX_DURATION_SECONDS:
+            message = f"Video is longer than the {MAX_DURATION_SECONDS // 60} minute limit for this tool."
+            db.update_job(job_id, status="error", error=message, stage_message="Error")
+            raise HTTPException(400, message)
+
     price = _price_for(user["id"], duration)
-    _charge(user["id"], price)
-    job_id = db.create_job(user["id"], "url", url, body.language, price, duration_seconds=duration)
+    try:
+        _charge(user["id"], price)
+    except HTTPException:
+        if prefetched_path:
+            prefetched_path.unlink(missing_ok=True)
+        db.update_job(job_id, status="error", error="Insufficient balance.", stage_message="Error")
+        raise
+
+    db.update_job(
+        job_id,
+        price_vnd=price,
+        duration_seconds=duration,
+        prefetched_path=str(prefetched_path) if prefetched_path else None,
+    )
     jobs.enqueue(job_id)
     return {"job_id": job_id, "price_vnd": price, "duration_seconds": duration}
 

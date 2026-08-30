@@ -89,21 +89,32 @@ tier can lose money even at its upper bound. Changing the price table means edit
 redeploying - it is deliberately not an env var, since it's a whole table rather than a single number.
 
 `routes/api.py` determines the price **before** charging, which is a real behavior change worth
-knowing: for a URL job it calls `media.probe_url` (a cheap yt-dlp metadata fetch, no download) to get
-the duration synchronously inside the request handler - this makes job creation noticeably slower than
-a bare DB write (a real network round-trip to TikTok/Facebook/etc.), a deliberate trade for accurate
-upfront pricing. For an upload it runs `audio.probe` (ffprobe) on the already-saved file before
-charging. If duration can't be determined at charge time (the URL probe failed - `probe_url` swallows
-all errors and returns `None`), `pricing.price_for_duration_seconds(None)` falls back to the highest
-tier as a safe upper bound, and `jobs.py`'s `_reconcile_price` (called right after the pipeline's own
-post-download duration re-check) refunds the difference once the real duration is known. Charging
-conservatively high and refunding down is simpler and safer than trying to collect more from the wallet
-mid-job if a low estimate turns out to be wrong - `_reconcile_price` therefore only ever refunds, never
-charges more. `db.try_charge_wallet` does the balance-check-and-deduct as one operation under `db.py`'s
-existing write lock, closing the race where two concurrent job submissions could both pass a balance
-check before either deduction lands. `jobs.py`'s `_refund` refunds `job["price_vnd"]` back to the
-wallet automatically on any failure path (`MediaError`/`AudioError` or an unhandled exception) - so a
-user is only ever charged for a job that actually produced a transcript.
+knowing: for a URL job it calls `media.probe_url` (a cheap yt-dlp metadata fetch, no download, retrying
+like `download_via_ytdlp` does - see "Retry on download") to get the duration synchronously inside the
+request handler - this makes job creation noticeably slower than a bare DB write (a real network
+round-trip to TikTok/Facebook/etc.), a deliberate trade for accurate upfront pricing. For an upload it
+runs `audio.probe` (ffprobe) on the already-saved file before charging.
+
+If the probe still can't determine a URL job's duration after retrying, `create_url_job` does **not**
+guess and charge blind - it calls `media.download_media` to fetch the file right there in the request
+(no OpenAI cost yet, only server bandwidth/time), then runs `audio.probe` (ffprobe) on the downloaded
+file to get the *real* duration before charging anything. This avoids the alternative of charging the
+highest tier as a blind estimate, which could wrongly reject a user who has enough balance for the
+video's real (lower) price but not for the pessimistic estimate. The downloaded path is saved as
+`jobs.prefetched_path`; `jobs.py`'s `_run_job` checks for it first and, if present, skips fetching the
+media again. This pre-fetch path is the slow one (a full download inside the request/response cycle)
+but is now rare in practice since retries already resolve most probe failures. `pricing.price_for_duration_seconds(None)`
+falling back to the highest tier only still applies if this download itself fails in a way that isn't a
+clean `MediaError` (defensive - shouldn't normally happen) - and `jobs.py`'s `_reconcile_price` (called
+after the pipeline's own post-download duration re-check) exists as a last-resort correction, refunding
+the difference if a job ever ends up overcharged this way. Charging conservatively high and refunding
+down beats trying to collect more from the wallet mid-job if an estimate turns out wrong -
+`_reconcile_price` therefore only ever refunds, never charges more. `db.try_charge_wallet` does the
+balance-check-and-deduct as one operation under `db.py`'s existing write lock, closing the race where
+two concurrent job submissions could both pass a balance check before either deduction lands. `jobs.py`'s
+`_refund` refunds `job["price_vnd"]` back to the wallet automatically on any failure path
+(`MediaError`/`AudioError` or an unhandled exception) - so a user is only ever charged for a job that
+actually produced a transcript.
 
 **Free trial**: a brand-new account gets one free transcription (`users.free_trial_used`, consumed
 atomically by `db.try_use_free_trial` under the write lock so two simultaneous "first" jobs can't both
@@ -143,13 +154,15 @@ stored instead, so internals never leak to the client.
 to quote a price before charging (see "Wallet & pricing"), and that result is persisted to
 `jobs.duration_seconds` so `fetch_url` doesn't have to probe the same URL again - it accepts a
 `known_duration` and only falls back to probing itself when that's `None` (duration wasn't determined
-up front). `probe_url` itself retries up to `_MAX_YTDLP_ATTEMPTS` times like `download_via_ytdlp` does
-(see "Retry on download") - a probe hits the same flaky bot-challenge as a real download, and since its
-result now drives up-front pricing, a transient probe failure used to mean overcharging a video whose
-real duration was knowable all along. A probe failure (after retries) is *not* treated as "unsupported,"
-since that used to cause a broken fallback that downloaded raw HTML as if it were a media file - it's
-priced at the highest tier instead (see "Wallet & pricing"'s reconciliation). After probing, `fetch_url`
-tries `download_via_ytdlp`; if that fails, `_is_known_site` checks whether a non-generic yt-dlp extractor
+up front - in practice this now only happens for a job created outside the normal route flow, since
+the route itself resolves an unknown duration by pre-fetching, see "Wallet & pricing"). `probe_url`
+itself retries up to `_MAX_YTDLP_ATTEMPTS` times like `download_via_ytdlp` does (see "Retry on
+download") - a probe hits the same flaky bot-challenge as a real download. `download_media` is
+`fetch_url`'s download-only half (try `download_via_ytdlp`, fall back to `download_direct_url`) split
+out so `routes/api.py` can call it directly for the pre-fetch case without re-probing a URL it already
+knows can't be probed. A probe/download failure (after retries) is *not* treated as "unsupported,"
+since that used to cause a broken fallback that downloaded raw HTML as if it were a media file. In
+`fetch_url`, if that fails, `_is_known_site` checks whether a non-generic yt-dlp extractor
 recognizes the URL - if so the yt-dlp error is re-raised as-is (real failure, not an unsupported link),
 otherwise it falls back to `download_direct_url` (plain `httpx` GET, only accepted if the response
 `Content-Type` is video/audio/octet-stream). This distinction matters: don't collapse these two failure
@@ -198,9 +211,12 @@ module-level `threading.Lock` in `db.py` - every write goes through that lock, i
 `try_charge_wallet`'s check-and-deduct and `try_use_free_trial`'s check-and-set, which is why they're
 race-safe). Three tables: `users` (email/password_hash/role/wallet_balance_vnd/is_locked/
 free_trial_used), `topups` (manual top-up requests, keyed by a unique `note` - the bank transfer
-content string - with `status` pending/approved/rejected), and `jobs` (user_id/price_vnd/duration_seconds
-plus the usual status/transcript/segments fields; `duration_seconds` is the probed/measured duration
-used to price the job, cached here so `fetch_url` doesn't re-probe a URL it already probed for pricing).
+content string - with `status` pending/approved/rejected), and `jobs` (user_id/price_vnd/duration_seconds/
+prefetched_path plus the usual status/transcript/segments fields; `duration_seconds` is the
+probed/measured duration used to price the job, cached here so `fetch_url` doesn't re-probe a URL it
+already probed for pricing; `prefetched_path` is set only when `routes/api.py` had to download the
+media itself to measure an unprobeable URL's duration before charging, so `jobs.py` knows to reuse that
+file instead of fetching it again).
 There are no migrations - schema changes are hand-edited
 `CREATE TABLE IF NOT EXISTS` statements, plus a small `_add_column_if_missing` helper (best-effort
 `ALTER TABLE`, swallows "duplicate column") used when a column was added to a table that already
