@@ -87,8 +87,10 @@ tế: gộp cookies YouTube vào cùng file với TikTok làm hỏng luôn khả
    - `YTDLP_COOKIES_FILE_YOUTUBE` = `/etc/secrets/cookies_youtube.txt` (chỉ dùng cho YouTube)
 6. Render tự redeploy sau khi lưu. Thử lại link YouTube/TikTok.
 
-⚠️ Cookie có thể hết hạn theo thời gian (vài tuần đến vài tháng tuỳ nền tảng) — nếu link lại bị lỗi
-"not supported" sau một thời gian, lặp lại bước 2-3 để lấy cookie mới cho file tương ứng.
+⚠️ Cookie có thể hết hạn theo thời gian — **TikTok đã ghi nhận thực tế hết hạn chỉ sau ~1 ngày**, còn
+YouTube thường sống lâu hơn (vài tuần đến vài tháng). Nếu link lại bị lỗi "Could not access this
+video" sau một thời gian, lặp lại bước 2-3 để lấy cookie mới cho file tương ứng. Với TikTok, chuẩn bị
+tinh thần phải làm lại việc này khá thường xuyên.
 
 ## Cấu trúc
 
