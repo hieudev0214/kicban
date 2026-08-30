@@ -97,18 +97,28 @@ def init_db() -> None:
 # ---- users ----------------------------------------------------------------
 
 
-def create_user(email: str, password_hash: str, role: str = "user") -> str:
+def create_user(email: str, password_hash: str, role: str = "user") -> str | None:
+    """Returns None if the email is already registered. The uniqueness check
+    and insert happen as one operation under the write lock (the UNIQUE
+    constraint on users.email is the real source of truth here) so two
+    near-simultaneous registrations for the same email - e.g. a double
+    submit - can't both pass a separate "does this exist" check before
+    either insert lands; the loser gets a clean None instead of crashing on
+    an unhandled sqlite3.IntegrityError."""
     user_id = uuid.uuid4().hex
     conn = get_connection()
     with _lock:
-        conn.execute(
-            """
-            INSERT INTO users (id, email, password_hash, role, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (user_id, email, password_hash, role, _now()),
-        )
-        conn.commit()
+        try:
+            conn.execute(
+                """
+                INSERT INTO users (id, email, password_hash, role, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, email, password_hash, role, _now()),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return None
     return user_id
 
 

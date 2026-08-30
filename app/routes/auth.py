@@ -53,6 +53,11 @@ def register(body: RegisterBody, response: Response):
 
     role = "admin" if email in ADMIN_EMAILS else "user"
     user_id = db.create_user(email, auth.hash_password(body.password), role=role)
+    if user_id is None:
+        # The pre-check above already covers the common case; this also
+        # catches the rare race of two near-simultaneous registrations for
+        # the same email (e.g. a double submit) without crashing.
+        raise HTTPException(400, "Email này đã được đăng ký.")
     _set_session_cookie(response, user_id)
     return _user_public(db.get_user_by_id(user_id))
 
