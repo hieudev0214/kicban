@@ -104,30 +104,41 @@ class VideoTooLongError(MediaError):
         )
 
 
-def probe_url(url: str) -> dict | None:
-    """
-    Best-effort cheap metadata fetch (duration, title) without downloading.
-    Returns None on any failure - this is only used for an early duration
-    check, so a failure here must NOT be treated as "site unsupported"
-    (that used to trigger a broken fallback that downloaded raw HTML as if
-    it were a media file). The real download attempt below has its own,
-    more reliable error handling.
-    """
-    opts = {**_ytdlp_base_opts(url), "skip_download": True}
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception:
-        return None
-    return {"duration": info.get("duration"), "title": info.get("title")}
-
-
 # TikTok's (and sometimes YouTube's) anti-bot challenge is flaky rather than
 # a hard block: the same URL can fail on one request and succeed on the next
 # from the same IP/cookies. A few retries with a short delay recovers most
-# of these transient failures without needing extra infrastructure.
+# of these transient failures without needing extra infrastructure. Used by
+# both probe_url (duration lookup for pricing) and download_via_ytdlp below.
 _MAX_YTDLP_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 3
+
+
+def probe_url(url: str) -> dict | None:
+    """
+    Best-effort cheap metadata fetch (duration, title) without downloading.
+    Retries like download_via_ytdlp does - a probe hits the same flaky
+    bot-challenge as a real download, and this result now drives up-front
+    pricing (see routes/api.py), so a transient failure here previously
+    meant charging the highest tier for videos whose real duration was
+    knowable all along. Returns None only once every attempt has failed -
+    this is used for an early duration check, so a failure here must NOT be
+    treated as "site unsupported" (that used to trigger a broken fallback
+    that downloaded raw HTML as if it were a media file).
+    """
+    opts = {**_ytdlp_base_opts(url), "skip_download": True}
+    for attempt in range(1, _MAX_YTDLP_ATTEMPTS + 1):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            return {"duration": info.get("duration"), "title": info.get("title")}
+        except Exception as e:
+            if attempt < _MAX_YTDLP_ATTEMPTS:
+                logger.warning(
+                    "yt-dlp probe attempt %d/%d failed for %s, retrying: %s",
+                    attempt, _MAX_YTDLP_ATTEMPTS, url, e,
+                )
+                time.sleep(_RETRY_DELAY_SECONDS)
+    return None
 
 
 def download_via_ytdlp(url: str, job_id: str) -> Path:
@@ -190,12 +201,18 @@ def download_direct_url(url: str, job_id: str) -> Path:
     return dest
 
 
-def fetch_url(url: str, job_id: str) -> Path:
-    info = probe_url(url)
-    if info:
-        duration = info.get("duration")
-        if duration and duration > MAX_DURATION_SECONDS:
-            raise VideoTooLongError(duration)
+def fetch_url(url: str, job_id: str, known_duration: float | None = None) -> Path:
+    """`known_duration` lets a caller that already probed this URL (routes/api.py
+    does, to quote a price before charging) skip probing it again here - probe_url
+    now retries on failure, so re-running it unconditionally would double the
+    worst-case latency for no benefit. Passed as None when duration wasn't
+    determined up front, in which case this probes as before."""
+    duration = known_duration
+    if duration is None:
+        info = probe_url(url)
+        duration = info.get("duration") if info else None
+    if duration and duration > MAX_DURATION_SECONDS:
+        raise VideoTooLongError(duration)
 
     try:
         return download_via_ytdlp(url, job_id)

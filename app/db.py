@@ -79,6 +79,7 @@ def init_db() -> None:
                 transcript_text TEXT,
                 segments_json TEXT,
                 price_vnd INTEGER NOT NULL DEFAULT 0,
+                duration_seconds REAL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -86,6 +87,7 @@ def init_db() -> None:
         )
         _add_column_if_missing(conn, "jobs", "user_id", "TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "jobs", "price_vnd", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, "jobs", "duration_seconds", "REAL")
         _add_column_if_missing(conn, "users", "free_trial_used", "INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
@@ -285,6 +287,7 @@ def create_job(
     language: str | None,
     price_vnd: int,
     engine: str = "openai",
+    duration_seconds: float | None = None,
 ) -> str:
     job_id = uuid.uuid4().hex
     now = _now()
@@ -293,10 +296,10 @@ def create_job(
         conn.execute(
             """
             INSERT INTO jobs (id, user_id, source_type, source_ref, engine, language,
-                               status, stage_message, price_vnd, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'queued', 'Queued', ?, ?, ?)
+                               status, stage_message, price_vnd, duration_seconds, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'queued', 'Queued', ?, ?, ?, ?)
             """,
-            (job_id, user_id, source_type, source_ref, engine, language, price_vnd, now, now),
+            (job_id, user_id, source_type, source_ref, engine, language, price_vnd, duration_seconds, now, now),
         )
         conn.commit()
     return job_id

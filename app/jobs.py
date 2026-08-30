@@ -66,7 +66,7 @@ def _run_job(job_id: str) -> None:
         db.update_job(job_id, status="fetching", stage_message=STAGE_FETCHING)
 
         if job["source_type"] == "url":
-            media_path = fetch_url(job["source_ref"], job_id)
+            media_path = fetch_url(job["source_ref"], job_id, known_duration=job.get("duration_seconds"))
         else:
             media_path = Path(job["source_ref"])
 

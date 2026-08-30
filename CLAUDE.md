@@ -139,14 +139,17 @@ trial" above). Errors are split into two tiers: known `MediaError`/`AudioError` 
 straight to the job (user-facing); anything else is logged with `exc_info` and a generic message is
 stored instead, so internals never leak to the client.
 
-**Media fetch** (`media.py`): `fetch_url` first does a cheap `probe_url` (yt-dlp, `skip_download`) for
-an early duration check - a probe failure is *not* treated as "unsupported," since that used to cause
-a broken fallback that downloaded raw HTML as if it were a media file. This same `probe_url` is now
-also called separately and earlier, from `routes/api.py`, purely to quote a price before charging (see
-"Wallet & pricing") - so a URL job's duration typically gets probed twice (once for pricing, once
-inside `fetch_url` for the actual fetch); that's an accepted minor inefficiency rather than something
-worth threading a cached result through the job record for. After probing, `fetch_url` tries
-`download_via_ytdlp`; if that fails, `_is_known_site` checks whether a non-generic yt-dlp extractor
+**Media fetch** (`media.py`): `probe_url` (yt-dlp, `skip_download`) is called first from `routes/api.py`
+to quote a price before charging (see "Wallet & pricing"), and that result is persisted to
+`jobs.duration_seconds` so `fetch_url` doesn't have to probe the same URL again - it accepts a
+`known_duration` and only falls back to probing itself when that's `None` (duration wasn't determined
+up front). `probe_url` itself retries up to `_MAX_YTDLP_ATTEMPTS` times like `download_via_ytdlp` does
+(see "Retry on download") - a probe hits the same flaky bot-challenge as a real download, and since its
+result now drives up-front pricing, a transient probe failure used to mean overcharging a video whose
+real duration was knowable all along. A probe failure (after retries) is *not* treated as "unsupported,"
+since that used to cause a broken fallback that downloaded raw HTML as if it were a media file - it's
+priced at the highest tier instead (see "Wallet & pricing"'s reconciliation). After probing, `fetch_url`
+tries `download_via_ytdlp`; if that fails, `_is_known_site` checks whether a non-generic yt-dlp extractor
 recognizes the URL - if so the yt-dlp error is re-raised as-is (real failure, not an unsupported link),
 otherwise it falls back to `download_direct_url` (plain `httpx` GET, only accepted if the response
 `Content-Type` is video/audio/octet-stream). This distinction matters: don't collapse these two failure
@@ -178,10 +181,11 @@ native-dependency breakage from the `canvas` npm package, or run as a second pai
 has not been added; that tradeoff (extra cost + complexity vs. YouTube support) is a product decision,
 not a technical one, so don't just wire it in - check with the user first.
 
-**Retry on download** (`download_via_ytdlp`): TikTok's (and sometimes YouTube's) bot challenge is flaky
-rather than a hard block — the same URL and cookies can fail on one attempt and succeed on the next.
-The function retries up to `_MAX_YTDLP_ATTEMPTS` (3) times with a `_RETRY_DELAY_SECONDS` (3s) pause
-before giving up and raising the generic "Could not access this video" `MediaError`.
+**Retry on download** (`download_via_ytdlp` and `probe_url`): TikTok's (and sometimes YouTube's) bot
+challenge is flaky rather than a hard block — the same URL and cookies can fail on one attempt and
+succeed on the next. Both functions retry up to `_MAX_YTDLP_ATTEMPTS` (3) times with a
+`_RETRY_DELAY_SECONDS` (3s) pause; `download_via_ytdlp` gives up by raising the generic "Could not
+access this video" `MediaError`, `probe_url` gives up by returning `None` (see "Media fetch").
 
 **Transcription** (`transcribe.py`): only `OpenAITranscriber` remains, implementing the `Transcriber`
 protocol (`transcribe(wav_path, language) -> TranscriptionResult`); `get_transcriber()` takes no
@@ -194,8 +198,10 @@ module-level `threading.Lock` in `db.py` - every write goes through that lock, i
 `try_charge_wallet`'s check-and-deduct and `try_use_free_trial`'s check-and-set, which is why they're
 race-safe). Three tables: `users` (email/password_hash/role/wallet_balance_vnd/is_locked/
 free_trial_used), `topups` (manual top-up requests, keyed by a unique `note` - the bank transfer
-content string - with `status` pending/approved/rejected), and `jobs` (user_id/price_vnd plus the usual
-status/transcript/segments fields). There are no migrations - schema changes are hand-edited
+content string - with `status` pending/approved/rejected), and `jobs` (user_id/price_vnd/duration_seconds
+plus the usual status/transcript/segments fields; `duration_seconds` is the probed/measured duration
+used to price the job, cached here so `fetch_url` doesn't re-probe a URL it already probed for pricing).
+There are no migrations - schema changes are hand-edited
 `CREATE TABLE IF NOT EXISTS` statements, plus a small `_add_column_if_missing` helper (best-effort
 `ALTER TABLE`, swallows "duplicate column") used when a column was added to a table that already
 existed on someone's disk; this only matters for a persisted local `data/jobs.db` since Render's

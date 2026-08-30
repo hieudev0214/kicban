@@ -75,7 +75,7 @@ def create_url_job(body: CreateUrlJob, request: Request, user: dict = Depends(au
 
     price = _price_for(user["id"], duration)
     _charge(user["id"], price)
-    job_id = db.create_job(user["id"], "url", url, body.language, price)
+    job_id = db.create_job(user["id"], "url", url, body.language, price, duration_seconds=duration)
     jobs.enqueue(job_id)
     return {"job_id": job_id, "price_vnd": price}
 
@@ -108,7 +108,7 @@ async def create_upload_job(
         db.update_job(job_id, status="error", error="Insufficient balance.", stage_message="Error")
         raise
 
-    db.update_job(job_id, source_ref=str(saved_path), price_vnd=price)
+    db.update_job(job_id, source_ref=str(saved_path), price_vnd=price, duration_seconds=duration)
     jobs.enqueue(job_id)
     return {"job_id": job_id, "price_vnd": price}
 
