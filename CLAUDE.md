@@ -188,9 +188,13 @@ cookies into a single cookies.txt was found in practice to break TikTok's anti-b
 even though each worked fine alone. TikTok's cookies were also observed to expire in practice after as
 little as ~1 day (much faster than the weeks/months typical of other sites), so expect to refresh them
 often. Because yt-dlp rewrites the cookiefile on every `close()`, and hosts like Render mount the
-configured file read-only (Secret Files), each source file is copied once to its own writable runtime
-path (`data/cookies_runtime_<sha1-prefix-of-source-path>.txt`) and that copy is what's actually passed
-to yt-dlp.
+configured file read-only (Secret Files), each source file is copied to its own writable runtime path
+(`data/cookies_runtime_<sha1-prefix-of-source-path>.txt`, in `_writable_cookies_path`) and that copy is
+what's actually passed to yt-dlp. **This copy is refreshed whenever the source file's mtime is newer
+than the existing copy's** - it used to be copied once and reused forever, which meant replacing a
+stale cookie file (e.g. via Render's Secret Files) silently had no effect on an already-running process
+until it happened to restart with a clean disk; confirmed in practice as the cause of a "fresh" cookie
+still failing with the exact same error as the one it replaced.
 
 **Cookie health check** (`media.check_cookie_health` + `routes/admin.py`'s `GET /api/admin/cookie-health`):
 since TikTok cookies expire so fast in practice, the admin panel (`/admin`) live-tests the configured

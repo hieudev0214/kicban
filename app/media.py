@@ -39,7 +39,13 @@ def _writable_cookies_path(source_file: str | None) -> str | None:
     (/etc/secrets/...), which is read-only - that write fails and raises an
     OSError that masks the real download error (or even fails an otherwise
     successful download). Work around it by copying the configured cookies
-    file to a writable path once per source file and using that copy."""
+    file to a writable path and using that copy instead.
+
+    The copy is refreshed whenever the source file's mtime is newer than the
+    last copy - not just made once and reused forever - so replacing a
+    stale/expired cookie file (e.g. via Render's Secret Files) actually
+    takes effect on an already-running process, without needing a full
+    restart to clear a stale copy."""
     if not source_file:
         return None
     with _cookies_lock:
@@ -48,7 +54,7 @@ def _writable_cookies_path(source_file: str | None) -> str | None:
             digest = hashlib.sha1(source_file.encode()).hexdigest()[:8]
             runtime_path = DATA_DIR / f"cookies_runtime_{digest}.txt"
             _runtime_cookie_paths[source_file] = runtime_path
-        if not runtime_path.exists():
+        if not runtime_path.exists() or Path(source_file).stat().st_mtime > runtime_path.stat().st_mtime:
             shutil.copyfile(source_file, runtime_path)
     return str(runtime_path)
 
