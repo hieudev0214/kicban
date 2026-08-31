@@ -69,3 +69,12 @@ YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "").strip() or None
 YTDLP_COOKIES_FILE_YOUTUBE = (
     os.environ.get("YTDLP_COOKIES_FILE_YOUTUBE", "").strip() or None
 )
+
+# A known-public TikTok video URL used to live-test whether YTDLP_COOKIES_FILE
+# still works, surfaced on the admin panel (see routes/admin.py's
+# /cookie-health) so a stale cookie shows up there instead of only being
+# discovered when a real customer's job fails. Left unset by default since
+# this module can't guess a TikTok video that's guaranteed to stay up - the
+# admin should set it to any video they know is public and likely to stay
+# that way (their own account's is a safe choice).
+COOKIE_HEALTHCHECK_URL = os.environ.get("COOKIE_HEALTHCHECK_URL", "").strip() or None

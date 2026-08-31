@@ -1,7 +1,11 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app import auth, db
+from app.config import COOKIE_HEALTHCHECK_URL
+from app.media import check_cookie_health
 
 router = APIRouter(prefix="/api/admin")
 
@@ -64,6 +68,22 @@ def delete_user(user_id: str, admin: dict = Depends(auth.require_admin)):
         raise HTTPException(400, "Không thể tự xoá tài khoản của chính mình.")
     db.delete_user(user_id)
     return {"ok": True}
+
+
+@router.get("/cookie-health")
+def cookie_health(admin: dict = Depends(auth.require_admin)):
+    """Live-tests the configured yt-dlp cookies against COOKIE_HEALTHCHECK_URL
+    so a stale TikTok cookie (see CLAUDE.md - they expire quickly in
+    practice) shows up here instead of only being found via a customer's
+    failed job or the server log."""
+    if not COOKIE_HEALTHCHECK_URL:
+        return {"configured": False}
+    result = check_cookie_health(COOKIE_HEALTHCHECK_URL)
+    return {
+        "configured": True,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        **result,
+    }
 
 
 @router.get("/topups")

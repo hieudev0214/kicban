@@ -192,6 +192,16 @@ configured file read-only (Secret Files), each source file is copied once to its
 path (`data/cookies_runtime_<sha1-prefix-of-source-path>.txt`) and that copy is what's actually passed
 to yt-dlp.
 
+**Cookie health check** (`media.check_cookie_health` + `routes/admin.py`'s `GET /api/admin/cookie-health`):
+since TikTok cookies expire so fast in practice, the admin panel (`/admin`) live-tests the configured
+cookies against `COOKIE_HEALTHCHECK_URL` (a public TikTok video the admin sets in config, since this
+module can't guess one that's guaranteed to stay up) on page load and via a manual "Kiểm tra lại"
+button, so a stale cookie shows up there instead of only being discovered from a failed customer job or
+the server log. Unlike `probe_url`, this is a single attempt with the raw error message returned (not
+swallowed) - it's an on-demand diagnostic the admin can just re-run, not something that needs to ride
+out TikTok's usual transient flakiness. Left inactive (returns `{"configured": False}`) if
+`COOKIE_HEALTHCHECK_URL` isn't set.
+
 **YouTube PO Token** (dormant, see above): `_ytdlp_base_opts` forces `extractor_args.youtube.player_client`
 to try `android`/`ios` before `web`, because YouTube's web client requires a PO Token that yt-dlp can't
 obtain from a datacenter IP without a separate token-provider service. Verified in practice that this

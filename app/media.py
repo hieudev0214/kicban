@@ -141,6 +141,28 @@ def probe_url(url: str) -> dict | None:
     return None
 
 
+def check_cookie_health(url: str) -> dict:
+    """Best-effort live check of whether the cookies currently configured
+    for `url`'s site (see _cookies_source_for) can actually extract metadata
+    right now. Surfaced on the admin panel (routes/admin.py's
+    /api/admin/cookie-health) so a stale TikTok cookie shows up there
+    instead of only being discovered when a real customer's job fails and
+    the error only ever reaches the server log. A single attempt, not
+    probe_url's retrying version - this is an on-demand admin diagnostic the
+    admin can just re-run, not something that needs to ride out TikTok's
+    usual transient flakiness - and the raw error message is returned (not
+    swallowed like probe_url does) so a stale-cookie failure is
+    distinguishable from some other problem from the admin panel alone."""
+    cookies_configured = _cookies_source_for(url) is not None
+    opts = {**_ytdlp_base_opts(url), "skip_download": True}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info(url, download=False)
+        return {"ok": True, "cookies_configured": cookies_configured, "error": None}
+    except Exception as e:
+        return {"ok": False, "cookies_configured": cookies_configured, "error": str(e)}
+
+
 def download_via_ytdlp(url: str, job_id: str) -> Path:
     out_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
     opts = {

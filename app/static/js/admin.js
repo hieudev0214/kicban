@@ -7,10 +7,50 @@ const jobsList = document.getElementById("jobs-list");
 const topupsTable = document.getElementById("topups-table");
 const topupsTbody = document.getElementById("topups-tbody");
 const topupsEmpty = document.getElementById("topups-empty");
+const cookieHealthStatus = document.getElementById("cookie-health-status");
+const cookieHealthRefresh = document.getElementById("cookie-health-refresh");
 
 function fmtVnd(n) {
     return n.toLocaleString("vi-VN") + " đ";
 }
+
+async function loadCookieHealth() {
+    cookieHealthStatus.textContent = "Đang kiểm tra...";
+    cookieHealthStatus.className = "";
+    const res = await fetch("/api/admin/cookie-health");
+    if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+    }
+    if (!res.ok) {
+        cookieHealthStatus.textContent = "Không thể kiểm tra trạng thái cookie.";
+        cookieHealthStatus.className = "error-text";
+        return;
+    }
+    const data = await res.json();
+    if (!data.configured) {
+        cookieHealthStatus.textContent =
+            "Chưa cấu hình COOKIE_HEALTHCHECK_URL nên không thể tự kiểm tra - " +
+            "thêm biến này (một link TikTok công khai ổn định) trong Environment trên Render để bật.";
+        cookieHealthStatus.className = "";
+        return;
+    }
+    const time = new Date(data.checked_at).toLocaleString("vi-VN");
+    if (data.ok) {
+        cookieHealthStatus.textContent = `✅ Cookie TikTok đang hoạt động tốt (kiểm tra lúc ${time}).`;
+        cookieHealthStatus.className = "cookie-health-ok";
+    } else {
+        const cookieNote = data.cookies_configured
+            ? "Cookie có thể đã hết hạn"
+            : "Chưa cấu hình cookie (YTDLP_COOKIES_FILE)";
+        cookieHealthStatus.textContent =
+            `⚠️ ${cookieNote} - link test không lấy được dữ liệu (kiểm tra lúc ${time}). ` +
+            `Lỗi: ${data.error || "không rõ"}`;
+        cookieHealthStatus.className = "error-text";
+    }
+}
+
+cookieHealthRefresh.addEventListener("click", loadCookieHealth);
 
 async function loadTopups() {
     const res = await fetch("/api/admin/topups?status=pending");
@@ -168,5 +208,6 @@ async function loadJobs(userId, email) {
     });
 }
 
+loadCookieHealth();
 loadTopups();
 loadUsers();
