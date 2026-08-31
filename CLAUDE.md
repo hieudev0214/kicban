@@ -72,6 +72,12 @@ immediately without waiting for the session to expire. `require_user`/`require_a
 `Depends()` dependencies; a locked or missing session surfaces as a plain 401 from `require_user`
 (not a distinct "you're locked" message) to avoid leaking account-existence info.
 
+`db.create_user` does its email-uniqueness check and insert as one operation under the write lock,
+returning `None` on a duplicate instead of raising - `routes/auth.py`'s pre-check (`get_user_by_email`)
+handles the common case cheaply, but the atomic check-and-insert is what actually closes the race where
+two near-simultaneous registrations for the same email (e.g. a double submit) could both pass that
+pre-check before either insert landed, which used to crash with an unhandled `sqlite3.IntegrityError`.
+
 **Admin bootstrap**: there's no "create admin" UI or CLI - `ADMIN_EMAILS` (comma-separated env var) is
 checked on both register and login; a matching email is promoted to `role="admin"` on the spot. This
 is the only way to create the first admin account. On Render this means setting `ADMIN_EMAILS` in the
@@ -79,8 +85,8 @@ service's Environment tab, then either registering fresh with that email or logg
 an existing account (login re-checks and promotes on every sign-in).
 
 **Wallet & pricing** (`pricing.py`): price is **tiered by media duration**, not a flat amount - `TIERS`
-is a hardcoded list of `(upper_bound_seconds, price_vnd)` pairs (≤2 min = 3,000đ, 2–5 min = 6,000đ,
-5–8 min = 10,000đ, 8–15 min = 15,000đ, 15–30 min = 25,000đ, 30–60 min = 40,000đ, 60–120 min = 70,000đ -
+is a hardcoded list of `(upper_bound_seconds, price_vnd)` pairs (≤2 min = 2,000đ, 2–5 min = 4,000đ,
+5–8 min = 6,000đ, 8–15 min = 10,000đ, 15–30 min = 18,000đ, 30–60 min = 28,000đ, 60–120 min = 50,000đ -
 the last bound matches `MAX_DURATION_SECONDS`). This replaced an earlier flat `PRICE_PER_JOB_VND`:
 Whisper's real cost scales with audio length (~$0.006/min, roughly 150đ/min), so one flat price either
 overcharged short clips or lost money on long ones (a 2-hour video costs ~18,000đ to transcribe but a
@@ -114,7 +120,11 @@ balance-check-and-deduct as one operation under `db.py`'s existing write lock, c
 two concurrent job submissions could both pass a balance check before either deduction lands. `jobs.py`'s
 `_refund` refunds `job["price_vnd"]` back to the wallet automatically on any failure path
 (`MediaError`/`AudioError` or an unhandled exception) - so a user is only ever charged for a job that
-actually produced a transcript.
+actually produced a transcript. `_charge`'s `HTTPException` on insufficient balance uses a **structured
+`detail`** (`{"message": ..., "duration_seconds": ..., "price_vnd": ...}`) rather than a plain string, so
+the frontend can show what duration the rejected price was actually based on instead of just the amount
+- `app.js` checks `typeof detail === "object"` to handle this alongside the plain-string details other
+endpoints still use.
 
 **Free trial**: a brand-new account gets one free transcription (`users.free_trial_used`, consumed
 atomically by `db.try_use_free_trial` under the write lock so two simultaneous "first" jobs can't both
@@ -246,4 +256,9 @@ same (check which IDs a script depends on before renaming or restructuring marku
 browser-controlled popup), so `<option>` needs its own explicit `background-color`/`color` per
 color-scheme in `style.css` or its text can render illegibly (near-invisible light text on the browser's
 default white popup) - this was hit and fixed once already, don't reintroduce it by removing those
-rules.
+rules. The job history list (`app.js`'s `loadHistory`) renders each row as **two separate spans**,
+`.history-source` (the URL/filename, which truncates with an ellipsis on overflow) and `.history-meta`
+(duration + status, fixed-width, never truncated) - they used to be one span, which meant a long TikTok
+URL (common, since shared links carry tracking query params) could fill the whole row and silently hide
+the status/duration text that came after it in the same string. Keep them as separate elements if this
+row is restyled further.

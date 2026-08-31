@@ -14,13 +14,13 @@ well under a third of the sale price, so no tier can lose money.
 # MAX_DURATION_SECONDS in config.py; a longer video is rejected before it
 # ever reaches pricing.
 TIERS: list[tuple[int, int]] = [
-    (2 * 60, 3_000),
-    (5 * 60, 6_000),
-    (8 * 60, 10_000),
-    (15 * 60, 15_000),
-    (30 * 60, 25_000),
-    (60 * 60, 40_000),
-    (120 * 60, 70_000),
+    (2 * 60, 2_000),
+    (5 * 60, 4_000),
+    (8 * 60, 6_000),
+    (15 * 60, 10_000),
+    (30 * 60, 18_000),
+    (60 * 60, 28_000),
+    (120 * 60, 50_000),
 ]
 
 # The first transcription job on a new account is free, to let people try

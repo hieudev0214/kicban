@@ -56,13 +56,13 @@ biến môi trường vì đây là cả bảng chứ không phải một con s�
 
 | Thời lượng video | Giá |
 |---|---|
-| ≤ 2 phút | 3.000đ |
-| 2–5 phút | 6.000đ |
-| 5–8 phút | 10.000đ |
-| 8–15 phút | 15.000đ |
-| 15–30 phút | 25.000đ |
-| 30–60 phút | 40.000đ |
-| 60–120 phút | 70.000đ |
+| ≤ 2 phút | 2.000đ |
+| 2–5 phút | 4.000đ |
+| 5–8 phút | 6.000đ |
+| 8–15 phút | 10.000đ |
+| 15–30 phút | 18.000đ |
+| 30–60 phút | 28.000đ |
+| 60–120 phút | 50.000đ |
 
 Mỗi bậc định giá cao hơn hẳn chi phí thật (Whisper ~$0.006/phút, tức ~150đ/phút) kể cả ở giới hạn trên
 của bậc đó, nên không bậc nào bị lỗ. Tài khoản mới được **1 lượt transcribe miễn phí** cho video ≤10
