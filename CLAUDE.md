@@ -201,10 +201,14 @@ since TikTok cookies expire so fast in practice, the admin panel (`/admin`) live
 cookies against `COOKIE_HEALTHCHECK_URL` (a public TikTok video the admin sets in config, since this
 module can't guess one that's guaranteed to stay up) on page load and via a manual "Kiểm tra lại"
 button, so a stale cookie shows up there instead of only being discovered from a failed customer job or
-the server log. Unlike `probe_url`, this is a single attempt with the raw error message returned (not
-swallowed) - it's an on-demand diagnostic the admin can just re-run, not something that needs to ride
-out TikTok's usual transient flakiness. Left inactive (returns `{"configured": False}`) if
-`COOKIE_HEALTHCHECK_URL` isn't set.
+the server log. Retries like `probe_url` (a single attempt reported "broken" far too often from ordinary
+TikTok flakiness that a real job's own retries would have ridden out fine - confirmed in practice), but
+duplicates that retry loop instead of calling `probe_url` directly so it can return the raw error
+message on failure, which `probe_url` swallows (returns only `None`). Left inactive (returns
+`{"configured": False}`) if `COOKIE_HEALTHCHECK_URL` isn't set - and the check is only as good as that
+URL staying valid: it was mistakenly pointed at another creator's video that got taken down/made
+private, which produced a false "cookie is broken" reading even though real jobs were succeeding fine;
+point it at a video the admin's own account controls to avoid that.
 
 **YouTube PO Token** (dormant, see above): `_ytdlp_base_opts` forces `extractor_args.youtube.player_client`
 to try `android`/`ios` before `web`, because YouTube's web client requires a PO Token that yt-dlp can't
