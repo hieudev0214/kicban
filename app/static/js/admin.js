@@ -44,8 +44,10 @@ async function loadCookieHealth() {
             ? "Cookie có thể đã hết hạn"
             : "Chưa cấu hình cookie (YTDLP_COOKIES_FILE)";
         cookieHealthStatus.textContent =
-            `⚠️ ${cookieNote} - link test không lấy được dữ liệu (kiểm tra lúc ${time}). ` +
-            `Lỗi: ${data.error || "không rõ"}`;
+            `⚠️ ${cookieNote} - link test không lấy được dữ liệu dù đã thử nhiều lần (kiểm tra lúc ${time}). ` +
+            `Lỗi: ${data.error || "không rõ"} — ` +
+            `TikTok đôi khi chặn ngẫu nhiên dù cookie vẫn ổn: nếu bấm "Kiểm tra lại" vài lần đều ra ⚠️ ` +
+            `liên tục thì mới chắc chắn cần thay cookie mới, còn thỉnh thoảng mới thấy 1 lần thì không sao.`;
         cookieHealthStatus.className = "error-text";
     }
 }

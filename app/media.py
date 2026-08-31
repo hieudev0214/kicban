@@ -118,6 +118,14 @@ class VideoTooLongError(MediaError):
 _MAX_YTDLP_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 3
 
+# check_cookie_health gets more attempts than the pipeline's own 3: it's a
+# deliberate, on-demand admin check (not a paying customer waiting on a
+# response), so trading a few more seconds of latency for a real drop in
+# false "cookie is broken" alarms is worth it. Confirmed in practice that
+# even 3 attempts isn't always enough - TikTok's block is genuinely
+# probabilistic per-request, not something retries alone fully eliminate.
+_COOKIE_HEALTHCHECK_ATTEMPTS = 6
+
 
 def probe_url(url: str) -> dict | None:
     """
@@ -155,12 +163,14 @@ def check_cookie_health(url: str) -> dict:
     when a real customer's job fails and the error only ever reaches the
     server log.
 
-    Retries the same way probe_url does - TikTok's bot-challenge fails on a
-    single attempt often enough (confirmed in practice: a real job's own
-    3-attempt probe/download can still succeed on attempt 2 or 3 after
-    attempt 1 fails) that checking only once reports "cookie is broken" from
-    ordinary flakiness a real job would have ridden out fine, which defeats
-    the point of a health check. This duplicates probe_url's retry loop
+    Retries like probe_url does, but more times (_COOKIE_HEALTHCHECK_ATTEMPTS,
+    not _MAX_YTDLP_ATTEMPTS) - TikTok's bot-challenge is genuinely
+    probabilistic per request, confirmed in practice by the exact same
+    cookies passing one check and failing the next only seconds apart even
+    with retries, so more attempts meaningfully cuts the false "cookie is
+    broken" rate (never to zero) in exchange for a check that can take
+    longer, which is an acceptable trade for an on-demand admin diagnostic
+    but not for a customer's job. This duplicates probe_url's retry loop
     rather than calling it directly because it needs the raw error message
     on failure - probe_url swallows it, returning only None - so a
     stale-cookie failure is distinguishable from some other problem from the
@@ -168,14 +178,14 @@ def check_cookie_health(url: str) -> dict:
     cookies_configured = _cookies_source_for(url) is not None
     opts = {**_ytdlp_base_opts(url), "skip_download": True}
     last_error: Exception | None = None
-    for attempt in range(1, _MAX_YTDLP_ATTEMPTS + 1):
+    for attempt in range(1, _COOKIE_HEALTHCHECK_ATTEMPTS + 1):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=False)
             return {"ok": True, "cookies_configured": cookies_configured, "error": None}
         except Exception as e:
             last_error = e
-            if attempt < _MAX_YTDLP_ATTEMPTS:
+            if attempt < _COOKIE_HEALTHCHECK_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_SECONDS)
     return {"ok": False, "cookies_configured": cookies_configured, "error": str(last_error)}
 
