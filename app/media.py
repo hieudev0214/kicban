@@ -190,11 +190,19 @@ def check_cookie_health(url: str) -> dict:
     return {"ok": False, "cookies_configured": cookies_configured, "error": str(last_error)}
 
 
+_YTDLP_FORMAT = "bestaudio[format_id!=audio]/best[acodec!=none][format_id!=audio]/best"
+
+
 def download_via_ytdlp(url: str, job_id: str) -> Path:
     out_template = str(DOWNLOADS_DIR / f"{job_id}.%(ext)s")
     opts = {
         **_ytdlp_base_opts(url),
-        "format": "bestaudio/best",
+        # NOT plain "bestaudio": TikTok exposes a format with id "audio" that is
+        # the post's attached *music track* (the "original sound"), not the
+        # video's own soundtrack - often a different length, with no speech.
+        # Picking it meant transcribing the background song instead of what
+        # was said. Exclude it and take the audio from the video itself.
+        "format": _YTDLP_FORMAT,
         "outtmpl": out_template,
         "noplaylist": True,
     }

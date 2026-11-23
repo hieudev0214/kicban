@@ -49,6 +49,9 @@ def normalize_to_wav(input_path: Path, output_path: Path) -> None:
                 "ffmpeg", "-y",
                 "-i", str(input_path),
                 "-vn",
+                # Normalize loudness: many phone-recorded clips (TikTok etc.)
+                # have quiet speech under music, which hurts recognition.
+                "-af", "loudnorm",
                 "-ac", "1",
                 "-ar", "16000",
                 "-acodec", "pcm_s16le",
